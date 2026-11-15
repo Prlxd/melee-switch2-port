@@ -1,0 +1,653 @@
+--- a/libs/dolphin/include/dolphin/os.h
++++ b/libs/dolphin/include/dolphin/os.h
+@@ -71,9 +71,15 @@
+ u32 __OSCoreClock : (OS_BASE_CACHED | 0x00FC);
+ int __EXIProbeStartTime[2] : (OS_BASE_CACHED | 0x30C0);
+ #else
++#if defined(MU_SWITCH2)
++/* Switch 2: the console's low memory is the start of MEM1, which sits inside the NRO. */
++#define __OSBusClock (*(u32*) (MU_MEM1_BASE + 0x00F8))
++#define __OSCoreClock (*(u32*) (MU_MEM1_BASE + 0x00FC))
++#else
+ #define __OSBusClock (*(u32*) (OS_BASE_CACHED | 0x00F8))
+ #define __OSCoreClock (*(u32*) (OS_BASE_CACHED | 0x00FC))
+ #endif
++#endif
+ #define OS_BUS_CLOCK __OSBusClock
+ #define OS_CORE_CLOCK __OSCoreClock
+ #define OS_TIMER_CLOCK (OS_BUS_CLOCK / 4)
+--- a/libs/dolphin/src/dolphin/thp/THPDec.c
++++ b/libs/dolphin/src/dolphin/thp/THPDec.c
+@@ -2913,11 +2913,11 @@
+     struct THPInitWork* work = (struct THPInitWork*) &__THPLC;
+ 
+     if ((PPCMfhid2() & 0x10000000) == 0) {
+-        DCInvalidateRange((void*) 0xE0000000, 0x4000);
++        DCInvalidateRange((void*) MU_LOCKED_CACHE, 0x4000);
+         LCEnable();
+     }
+ 
+-    base = (u8*) 0xE0000000;
++    base = (u8*) MU_LOCKED_CACHE;
+     for (j = 0; j < 2; j++) {
+         for (i = 0; i < 5; i++) {
+             work->cache.offsets512[j][i] = base;
+@@ -2925,7 +2925,7 @@
+         }
+     }
+ 
+-    base = (u8*) 0xE0000000;
++    base = (u8*) MU_LOCKED_CACHE;
+     for (j = 0; j < 2; j++) {
+         for (i = 0; i < 9; i++) {
+             work->cache.offsets672[j][i] = base;
+@@ -2933,14 +2933,14 @@
+         }
+     }
+ 
+-    base = (u8*) 0xE0000000;
++    base = (u8*) MU_LOCKED_CACHE;
+     work->cache.work512[0] = base;
+     base += 0x2000;
+     work->cache.work512[1] = base;
+     base += 0x800;
+     work->cache.work512[2] = base;
+ 
+-    base             = (u8*) 0xE0000000;
++    base             = (u8*) MU_LOCKED_CACHE;
+ #ifdef MU_NATIVE
+     /* The console relies on __THPLCWork672 following __THPLC; the host does not place it there. */
+ #define work672 __THPLCWork672
+--- a/src/melee/ft/ftdata.c
++++ b/src/melee/ft/ftdata.c
+@@ -1808,7 +1808,7 @@
+                     }
+                 } else {
+                     temp_r4_2 = temp_r3->x14;
+-                    if (temp_r4_2 < 0x80000000UL) {
++                    if (temp_r4_2 < MU_GUEST_FLOOR) {   /* ARAM offset, else a pointer */
+                         lbArq_80014BD0(temp_r4_2, fp->x59C,
+                                        OSRoundUp32B(temp_r3->x8), 0, 0);
+                     } else {
+@@ -1859,7 +1859,7 @@
+                     }
+                 } else {
+                     temp_r4_2 = temp_r3->x14;
+-                    if (temp_r4_2 < 0x80000000UL) {
++                    if (temp_r4_2 < MU_GUEST_FLOOR) {   /* ARAM offset, else a pointer */
+                         lbArq_80014BD0(temp_r4_2, arg0->x5A0,
+                                        OSRoundUp32B(temp_r3->x8), 0, 0);
+                     } else {
+--- a/src/melee/ft/ftdrawcommon.c
++++ b/src/melee/ft/ftdrawcommon.c
+@@ -123,7 +123,7 @@
+     /* Arcade look "Show attack hitboxes" (the always-display hitbox code's first two lines): the
+      * attack bubbles of every fighter; the hurtbox, reflect, absorb and shield bubbles below keep
+      * their own flag. The flag byte is match state and stays as it is. */
+-    if ((fighter->x21FC_flag.b6 != 0 || *(volatile u32*) 0x800805FC == 0x60000000 || mu_arcade_hitboxes()) &&
++    if ((fighter->x21FC_flag.b6 != 0 || *(volatile u32*) (MU_MEM1_BASE + 0x805FCu) == 0x60000000 || mu_arcade_hitboxes()) &&
+         Bam_DrawHitboxes()) {
+ #elif defined(MU_NATIVE)
+     /* Arcade look "Show attack hitboxes": as in the branch above. */
+@@ -160,7 +160,7 @@
+ #endif
+ #if MU_ROGUE  /* rogueMelee + Melee Maker */
+     }
+-    if ((fighter->x21FC_flag.b6 != 0 || *(volatile u32*) 0x800805FC == 0x60000000) && Bam_DrawHurtboxes()) {
++    if ((fighter->x21FC_flag.b6 != 0 || *(volatile u32*) (MU_MEM1_BASE + 0x805FCu) == 0x60000000) && Bam_DrawHurtboxes()) {
+ #elif defined(MU_NATIVE)
+     }
+     if (fighter->x21FC_flag.b6 != 0) {
+--- a/src/melee/ft/kinds/ftCommon/ftCo_0A01.c
++++ b/src/melee/ft/kinds/ftCommon/ftCo_0A01.c
+@@ -6660,6 +6660,10 @@
+ 
+     cmd = ftCo_800A229C(fp, &sp28);
+     if (cmd != 0) {
++#if 0
++        { static int shown = 0; if (shown < 40) { ++shown;
++            OSReport("[cpu] slot %d level %d: attack decision %d\n", fp->player_idx, fp->cpu.level, (int) cmd); } }
++#endif
+         ftCo_800AE7AC(fp, &sp28, cmd);
+         return;
+     }
+@@ -7935,6 +7939,20 @@
+         }
+         ftCo_800ADC28(fp);
+         cmd = data->x18;
++#if 0
++        /* Switch 2 port diagnostics: what each CPU decides to do (passive CPUs). */
++        {
++            static int last[6] = { -1, -1, -1, -1, -1, -1 };
++            static int lines = 0;
++            const int slot = fp->player_idx & 7;
++            if (slot < 6 && last[slot] != cmd && lines < 300) {
++                ++lines;
++                last[slot] = cmd;
++                OSReport("[cpu] slot %d level %d kind %d: command %d (x1C %d, target %p)\n", slot,
++                         data->level, (int) data->kind, (int) cmd, (int) data->x1C, (void*) data->x44);
++            }
++        }
++#endif
+ #ifdef MU_NATIVE
+         if (mu_te(MU_TE_INFINITE_SHIELDS)) {
+             cmd = 7;   /* 20XX TE Infinite Shields: CPUs run the shield command */
+--- a/src/melee/ft/kinds/ftCommon/ftCo_Jump.c
++++ b/src/melee/ft/kinds/ftCommon/ftCo_Jump.c
+@@ -31,10 +31,19 @@
+ #include <mu_tmce_osd.h>
+ #endif
+ 
++#ifdef MU_NATIVE
++int mu_tap_jump_off(void);   /* shim/mu_entry.c: config.ini tapjump=0 */
++#include <melee/pl/player.h>
++/* Humans only: CPUs jump with the stick, so they keep tap jump. */
++#define MU_TAP_JUMP_ON(fp) (!mu_tap_jump_off() || Player_GetPlayerSlotType((fp)->player_idx) != Gm_PKind_Human)
++#else
++#define MU_TAP_JUMP_ON(fp) 1
++#endif
++
+ ftCo_JumpInput ftCo_Jump_GetInput(Fighter_GObj* gobj)
+ {
+     Fighter* fp = GET_FIGHTER(gobj);
+-    if ((fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold) &&
++    if (MU_TAP_JUMP_ON(fp) && (fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold) &&
+         (fp->active_timer.lstick.y < p_ftCommonData->tap_jump_window))
+     {
+         return JumpInput_LStick;
+@@ -71,7 +80,7 @@
+         return ftCo_800C5A50(gobj);
+     }
+ 
+-    if ((fp->input.lstick[0].y >=
++    if (MU_TAP_JUMP_ON(fp) && (fp->input.lstick[0].y >=
+          p_ftCommonData->relaxed_tap_jump_threshold) &&
+         (fp->active_timer.lstick.y < p_ftCommonData->tap_jump_window))
+     {
+--- a/src/melee/ft/kinds/ftCommon/ftCo_JumpAerial.c
++++ b/src/melee/ft/kinds/ftCommon/ftCo_JumpAerial.c
+@@ -50,10 +50,19 @@
+     }
+ }
+ 
++#ifdef MU_NATIVE
++int mu_tap_jump_off(void);   /* shim/mu_entry.c: config.ini tapjump=0 */
++#include <melee/pl/player.h>
++/* Humans only: CPUs jump with the stick, so they keep tap jump. */
++#define MU_TAP_JUMP_ON(fp) (!mu_tap_jump_off() || Player_GetPlayerSlotType((fp)->player_idx) != Gm_PKind_Human)
++#else
++#define MU_TAP_JUMP_ON(fp) 1
++#endif
++
+ bool ft_did_jump(Fighter* fp, bool arg1)
+ {
+     if (fp->x1968_jumpsUsed < fp->co_attrs.max_jumps &&
+-        ((fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold &&
++        ((MU_TAP_JUMP_ON(fp) && fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold &&
+           fp->active_timer.lstick.y < p_ftCommonData->tap_jump_window) ||
+          fp->input.pressed_buttons & HSD_PAD_XY) &&
+         !(arg1 && (fp->x68A < p_ftCommonData->x1C)))
+--- a/src/melee/ft/kinds/ftCommon/ftCo_JumpAerialF1.c
++++ b/src/melee/ft/kinds/ftCommon/ftCo_JumpAerialF1.c
+@@ -13,6 +13,15 @@
+ #include <melee/ft/ftcommon.h>
+ #include <melee/ft/inlines.h>
+ 
++#ifdef MU_NATIVE
++int mu_tap_jump_off(void);   /* shim/mu_entry.c: config.ini tapjump=0 */
++#include <melee/pl/player.h>
++/* Humans only: CPUs jump with the stick, so they keep tap jump. */
++#define MU_TAP_JUMP_ON(fp) (!mu_tap_jump_off() || Player_GetPlayerSlotType((fp)->player_idx) != Gm_PKind_Human)
++#else
++#define MU_TAP_JUMP_ON(fp) 1
++#endif
++
+ static inline struct Fighter_x2D0_t* ftCo_800D74A4_inline(Fighter* fp)
+ {
+     return fp->x2D0;
+@@ -64,7 +73,7 @@
+             r29 = 0;
+         }
+         r4 = 1;
+-        if (!(fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold) &&
++        if (!(MU_TAP_JUMP_ON(fp) && fp->input.lstick[0].y >= p_ftCommonData->tap_jump_threshold) &&
+             !(fp->input.held_buttons[0] & 0xC00))
+         {
+             r4 = 0;
+--- a/src/melee/gm/gmmain.c
++++ b/src/melee/gm/gmmain.c
+@@ -144,43 +144,148 @@
+     u32 _[2];
+ 
+     OSInit();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 1 OSInit();\n");
++#endif
+     VIInit();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 2 VIInit();\n");
++#endif
+     DVDInit();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 3 DVDInit();\n");
++#endif
+     PADInit();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 4 PADInit();\n");
++#endif
+     CARDInit();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 5 CARDInit();\n");
++#endif
+     OSInitAlarm();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 6 OSInitAlarm();\n");
++#endif
+     db_GetGameLaunchButtonState();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 7 db_GetGameLaunchButtonState();\n");
++#endif
+     gmMain_8015FDA4();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 8 gmMain_8015FDA4();\n");
++#endif
+     if (OSGetConsoleSimulatedMemSize() / (1024 * 1024) == 48) {
+         OSAllocFromArenaHi(0x01800000, 4);
+     }
+     arena_size = (intptr_t) OSGetArenaHi() - (intptr_t) OSGetArenaLo();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 9 arena_size = (intptr_t) OSGetArenaHi() - (intptr_t) OSGetArenaLo();\n");
++#endif
+     HSD_SetInitParameter(HSD_INIT_XFB_MAX_NUM, 2);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 10 HSD_SetInitParameter(HSD_INIT_XFB_MAX_NUM, 2);\n");
++#endif
+     HSD_SetInitParameter(HSD_INIT_RENDER_MODE_OBJ, &GXNtsc480IntDf);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 11 HSD_SetInitParameter(HSD_INIT_RENDER_MODE_OBJ, &GXNtsc480IntDf);\n");
++#endif
+     HSD_SetInitParameter(HSD_INIT_FIFO_SIZE, 0x40000);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 12 HSD_SetInitParameter(HSD_INIT_FIFO_SIZE, 0x40000);\n");
++#endif
+     HSD_SetInitParameter(HSD_INIT_HEAP_MAX_NUM, 4);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 13 HSD_SetInitParameter(HSD_INIT_HEAP_MAX_NUM, 4);\n");
++#endif
+     db_SetupCrashHandler();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 14 db_SetupCrashHandler();\n");
++#endif
+     HSD_AllocateXFB(2, &GXNtsc480IntDf);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 15 HSD_AllocateXFB(2, &GXNtsc480IntDf);\n");
++#endif
+     HSD_GXSetFifoObj(GXInit(HSD_AllocateFifo(0x40000), 0x40000));
++#ifdef MU_SWITCH2
++    OSReport("[boot] 16 HSD_GXSetFifoObj(GXInit(HSD_AllocateFifo(0x40000), 0x40000));\n");
++#endif
+     HSD_InitComponent();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 17 HSD_InitComponent();\n");
++#endif
+     GXSetMisc(1, 8);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 18 GXSetMisc(1, 8);\n");
++#endif
+     *HSD_RandSeedPtr = OSGetTick();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 19 *HSD_RandSeedPtr = OSGetTick();\n");
++#endif
+     lbAudioAx_8002838C();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 20 lbAudioAx_8002838C();\n");
++#endif
+     lb_80019AAC(&gmMain_8015FD24);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 21 lb_80019AAC(&gmMain_8015FD24);\n");
++#endif
+     HSD_VISetUserPostRetraceCallback(&gmMain_8015FDA0);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 22 HSD_VISetUserPostRetraceCallback(&gmMain_8015FDA0);\n");
++#endif
+     HSD_VISetUserGXDrawDoneCallback(&HSD_VIDrawDoneXFB);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 23 HSD_VISetUserGXDrawDoneCallback(&HSD_VIDrawDoneXFB);\n");
++#endif
+     HSD_VISetBlack(0);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 24 HSD_VISetBlack(0);\n");
++#endif
+     lbMemory_8001564C();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 25 lbMemory_8001564C();\n");
++#endif
+     lbHeap_80015F3C();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 26 lbHeap_80015F3C();\n");
++#endif
+     lbDvd_80018F68();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 27 lbDvd_80018F68();\n");
++#endif
+     lbArq_80014D2C();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 28 lbArq_80014D2C();\n");
++#endif
+     lbCardNew_Init();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 29 lbCardNew_Init();\n");
++#endif
+     lbCardGame_Init();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 30 lbCardGame_Init();\n");
++#endif
+     lbSnap_8001E290();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 31 lbSnap_8001E290();\n");
++#endif
+     gmMainLib_8015FCC0();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 32 gmMainLib_8015FCC0();\n");
++#endif
+     lbMthp_8001F87C();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 33 lbMthp_8001F87C();\n");
++#endif
+     HSD_SisLib_803A6048(0xC000);
++#ifdef MU_SWITCH2
++    OSReport("[boot] 34 HSD_SisLib_803A6048(0xC000);\n");
++#endif
+     gmMainLib_8015FBA4();
++#ifdef MU_SWITCH2
++    OSReport("[boot] 35 gmMainLib_8015FBA4();\n");
++#endif
+ 
+     if (DbLevel != DbLKind_Master && db_gameLaunchButtonState & HSD_PAD_R &&
+         hsd_803931A4(-1))
+--- a/src/melee/gm/gmscmemcard.c
++++ b/src/melee/gm/gmscmemcard.c
+@@ -198,6 +198,9 @@
+ void gm_801AF250(void)
+ {
+     u32 temp_r3 = lb_8001C87C();
++#ifdef MU_SWITCH2
++    OSReport("[memcard] card check result %u\n", temp_r3);
++#endif
+     enter_data.unk18 = 1;
+     switch (temp_r3) {
+     case 1:
+@@ -290,6 +293,15 @@
+ {
+     int temp_r29;
+     u8 _[0x14];
++#ifdef MU_SWITCH2
++    {
++        static int last_decision = -1;
++        if ((int) enter_data.decision != last_decision) {
++            OSReport("[memcard] decision %d\n", (int) enter_data.decision);
++            last_decision = (int) enter_data.decision;
++        }
++    }
++#endif
+ 
+     if (DbLevel >= DbLKind_DebugRom && set_gm_804D6870_inline() != 0) {
+         if (HSD_PadCopyStatus->trigger & HSD_PAD_L) {
+--- a/src/melee/gm/gmvsmelee.c
++++ b/src/melee/gm/gmvsmelee.c
+@@ -266,6 +266,21 @@
+                     start->players[i].cpu_kind = 4;   /* a VS Mode CPU, as the CSS sets it */
+                 }
+             }
++            {
++                /* Switch 2 shader sweep (config.ini shadersweep=1): short timed matches with
++                 * every item on at the highest rate, and no pausing. */
++                extern int mu_shader_sweep(void);
++                if (mu_shader_sweep()) {
++                    start->rules.match_kind = MatchKind_Time;
++                    start->rules.is_stock = 0;
++                    start->rules.timer_enabled = 1;
++                    start->rules.timer_counts_up = 0;
++                    start->rules.time_limit = 20;
++                    start->rules.item_freq = 4;
++                    start->rules.x20 = (u64) -1;
++                    start->rules.disable_pausing = 1;
++                }
++            }
+         }
+     }
+ 
+@@ -288,6 +303,14 @@
+     if (mu_arcade_pack()) {
+         id0 = 0;
+     }
++    {
++        /* The shader sweep goes from each match straight to the next one. */
++        extern int mu_shader_sweep(void);
++        if (mu_shader_sweep()) {
++            id0 = 0;
++            id1 = 0;
++        }
++    }
+ #endif
+ 
+ #ifdef MU_NATIVE
+--- a/src/melee/gr/grcastle.c
++++ b/src/melee/gr/grcastle.c
+@@ -1300,13 +1300,13 @@
+ 
+     switch (gp->map_id) {
+     case Gr_Kind_Onett:
+-        gp->u.castle7.xD0 = grCastle_801CD4D0(0x11);
++        gp->u.castle7.xD0 = MU_ADDR32(grCastle_801CD4D0(0x11));
+         return;
+     case Gr_Kind_BigBlue:
+-        gp->u.castle7.xD0 = grCastle_801CD4D0(7);
++        gp->u.castle7.xD0 = MU_ADDR32(grCastle_801CD4D0(7));
+         return;
+     case Gr_Kind_MuteCity:
+-        gp->u.castle7.xD0 = grCastle_801CD4D0(5);
++        gp->u.castle7.xD0 = MU_ADDR32(grCastle_801CD4D0(5));
+         return;
+     default:
+         break;
+@@ -1318,6 +1318,13 @@
+     return false;
+ }
+ 
++#ifdef MU_NATIVE
++/* The switch's countdown is the s16 at gp+CC. Through castle8 (whose first field is a pointer,
++ * 8 bytes here) it landed on gp+D0, the address kept in castle7.xD0. */
++#define MU_CASTLE_SWITCH_COUNT(gp) (*(s16*) &(gp)->u.castle11.xCC)
++#else
++#define MU_CASTLE_SWITCH_COUNT(gp) ((gp)->u.castle8.plat[0].state)
++#endif
+ void grCastle_801CF308(Ground_GObj* gobj)
+ {
+     s32 var_r6 = 0;
+@@ -1365,7 +1372,7 @@
+                 grMaterial_801C8DE0((Item_GObj*) MU_Z(gp->u.castle11.xD8), 0.0f,
+                                     -1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 4.0f);
+                 grMaterial_801C8E08((Item_GObj*) MU_Z(gp->u.castle11.xD8));
+-                gp->u.castle8.plat[0].state = yakumono_param->x54;
++                MU_CASTLE_SWITCH_COUNT(gp) = yakumono_param->x54;
+             }
+         }
+         var_r6 = 1;
+@@ -1379,7 +1386,7 @@
+             grMaterial_801C8CDC((HSD_GObj*) MU_Z(gp->u.castle11.xD8));
+             gp->u.castle11.xD8 = 0;
+         }
+-        ((Ground*) (gp->u.castle7.xD0)->user_data)->u.castle5.xC4 = 1;
++        ((Ground*) ((HSD_GObj*) MU_Z(gp->u.castle7.xD0))->user_data)->u.castle5.xC4 = 1;
+         gp->u.castle5.xC4 = 5;
+         grAnime_801C8138((HSD_GObj*) gobj, gp->map_id, 0);
+         Ground_801C5440(gp, 0, 0x53027U);
+@@ -1388,13 +1395,13 @@
+     }
+     case 5: {
+         if (grAnime_801C83D0((HSD_GObj*) gobj, 0, 7) != 0) {
+-            s16 cnt = gp->u.castle8.plat[0].state;
+-            gp->u.castle8.plat[0].state = cnt - 1;
++            s16 cnt = MU_CASTLE_SWITCH_COUNT(gp);
++            MU_CASTLE_SWITCH_COUNT(gp) = cnt - 1;
+             if (cnt < 0) {
+                 HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
+             }
+         }
+-        if (((Ground*) (gp->u.castle7.xD0)->user_data)->u.castle5.xC4 == 0) {
++        if (((Ground*) ((HSD_GObj*) MU_Z(gp->u.castle7.xD0))->user_data)->u.castle5.xC4 == 0) {
+             gp->u.castle5.xC4 = 0;
+             HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
+         }
+--- a/src/melee/gr/grdisplay.c
++++ b/src/melee/gr/grdisplay.c
+@@ -82,7 +82,7 @@
+     gp = GET_GROUND(gobj);
+     if (gp->x11_flags.b012 == Camera_8003108C()) {
+         if (gp->x18 != NULL) {
+-            if (((intptr_t) gp->x18 & ~0x7FFFFFFF) == 0) {
++            if ((uintptr_t) gp->x18 < MU_GUEST_FLOOR) {   /* not a game pointer */
+                 OSReport("oioi... %08x\n", gp->x18);
+             }
+             if (HSD_GObj_804D7818->hsd_obj != gp->x18->hsd_obj) {
+--- a/src/melee/gr/types.h
++++ b/src/melee/gr/types.h
+@@ -1683,7 +1683,14 @@
+ struct grCastle_GroundVars7 {
+     /* +00 gp+C4 */ s16 xC4;
+     /* +02 gp+C6 */ u8 pad_xC6[0xA];
++#ifdef MU_NATIVE
++    /* +0C gp+D0 */ u32 xD0; /* a 32-bit address, as the console's: an 8-byte pointer here moved
++                              * xD4 and xD8 off the castle11 fields the same object is read
++                              * through, and castle11.xD8 landed inside the pointer (the crash on
++                              * Princess Peach's Castle when the first switch appears) */
++#else
+     /* +0C gp+D0 */ HSD_GObj* xD0;
++#endif
+     /* +10 gp+D4 */ u32 xD4;
+     /* +14 gp+D8 */ s32 xD8;
+ };
+--- a/src/melee/it/it_279C.c
++++ b/src/melee/it/it_279C.c
+@@ -1429,6 +1429,16 @@
+         } else {
+             spawn.kind--;
+         }
++#ifdef MU_NATIVE
++        {
++            /* The shader sweep releases every Pokemon in turn, Mew and Celebi included. */
++            extern int mu_shader_sweep(void);
++            static unsigned int sweep_next;
++            if (mu_shader_sweep()) {
++                spawn.kind = (enum ItemKind) (sweep_next++ % (unsigned int) (It_PKind_Terminate - It_PKind_Start));
++            }
++        }
++#endif
+         if (spawn.kind == (enum ItemKind) Pokemon_ID_Metamon &&
+             (it_8026B3C0(It_PKind_Metamon) != 0 || ftLib_800860C4() == 4))
+         {
+--- a/src/melee/it/itspawn.c
++++ b/src/melee/it/itspawn.c
+@@ -104,6 +104,16 @@
+ ItemKind it_8026C65C(ItemPickTable* table)
+ {
+     int temp_r6 = table->x8;
++#ifdef MU_NATIVE
++    {
++        /* The shader sweep spawns every item in the table in turn, so none is left to chance. */
++        extern int mu_shader_sweep(void);
++        static unsigned int sweep_next;
++        if (mu_shader_sweep() && table->size > 0) {
++            return table->x4[sweep_next++ % (unsigned int) table->size];
++        }
++    }
++#endif
+     return table->x4[bisectValue(HSD_Randi(temp_r6), table, 0, table->size)];
+ }
+ 
+--- a/src/melee/lb/lbfile.c
++++ b/src/melee/lb/lbfile.c
+@@ -123,7 +123,7 @@
+ {
+     int type;
+     *size = lbFile_8001634C(file);
+-    type = (dst >= 0x80000000) ? 0x21 : 0x23;
++    type = (dst >= MU_GUEST_FLOOR) ? 0x21 : 0x23;   /* main memory, else ARAM */
+     HSD_DevComRequest(file, 0, dst, OSRoundUp32B(*size), type, pri, callback,
+                       args);
+ }
+--- a/src/melee/lb/lbmemory.c
++++ b/src/melee/lb/lbmemory.c
+@@ -50,7 +50,7 @@
+     Handle* h;
+     HSD_ASSERT(0x7B, _p(free_heap));
+ 
+-    if ((uintptr_t) arenaLo < 0x80000000U && (uintptr_t) arenaHi < 0x80000000U)
++    if ((uintptr_t) arenaLo < MU_GUEST_FLOOR && (uintptr_t) arenaHi < MU_GUEST_FLOOR)
+     {
+ #ifdef MUST_MATCH
+         // The retail assert string spells the u32 casts.
+@@ -296,7 +296,7 @@
+             block->addr = current;
+             _p(compact_cursor) = (uintptr_t) block->addr + block->size;
+ 
+-            if ((uintptr_t) block->addr < 0x80000000U) {
++            if ((uintptr_t) block->addr < MU_GUEST_FLOOR) {
+                 HSD_DevComRequest(0, (uintptr_t) src, (uintptr_t) current,
+                                   OSRoundUp32B(block->size), 0x1B, 1,
+                                   lbMemory_80015320, (uintptr_t) block->next);
+--- a/src/melee/mn/mncharsel.c
++++ b/src/melee/mn/mncharsel.c
+@@ -3089,6 +3089,18 @@
+ 
+         cursor->xC = (f32) ((0.0002f * dx) + cursor->xC);
+         cursor->x10 = (f32) ((0.0002f * dy) + cursor->x10);
++#ifdef MU_NATIVE
++        {
++            /* Switch 2 shader sweep: players 1 and 2's hands sit on Mario's icon (the middle of its
++             * hit box), so the sweep's A press always picks a character. Which one doesn't matter:
++             * the sweep sets every player's character when the match starts. */
++            extern int mu_shader_sweep(void);
++            if (mu_shader_sweep() && cursor->x4 < 2) {
++                cursor->xC = (ICONBNDS_COL1_L + ICONBNDS_COL2_L) / 2;
++                cursor->x10 = (ICONROWHT_TOP_TOP + ICONROWHT_MID_TOP) / 2;
++            }
++        }
++#endif
+ 
+         mnCharSel_803F0E8C[cursor->x4].data->scroll_amt = 0.0f;
+ 
+--- a/src/sysdolphin/baselib/gobj.c
++++ b/src/sysdolphin/baselib/gobj.c
+@@ -1,4 +1,10 @@
+ #include "gobj.h"
++#ifdef MU_SWITCH2
++/* Switch 2 port, "crashtrail=1": the host notes each object callback before it runs, so a crash
++ * that ends the program leaves the last one behind (host_switch.cpp). */
++extern int mu_crumbs_on;
++void mu_switch_crumb(unsigned kind, unsigned long value);
++#endif
+ 
+ #include "cobj.h"
+ #include "fog.h"
+@@ -91,6 +97,9 @@
+                 {
+                     HSD_GObj_CurrentInvokedProcGObj = gobj;
+                     HSD_GObj_CurrentInvokedProc = proc;
++#ifdef MU_SWITCH2
++                    if (mu_crumbs_on) mu_switch_crumb(1, (unsigned long) proc->on_invoke);
++#endif
+                     proc->on_invoke(proc->gobj);
+                     HSD_GObj_NextInvokedProc = proc->next;
+                     if (HSD_GObj_DelayedProcInfo.flags != 0) {
+@@ -149,6 +158,9 @@
+     }
+ #endif
+     HSD_GObj_804D7814 = cur;
++#ifdef MU_SWITCH2
++    if (mu_crumbs_on) mu_switch_crumb(2, (unsigned long) cur->render_cb);
++#endif
+     cur->render_cb(cur, i);
+     HSD_GObj_804D7814 = saved;
+ #ifdef MU_NATIVE

@@ -1,0 +1,8 @@
+*.nro
+*.nacp
+*.elf
+build/
+switch2/nro/source/
+switch2/launcher/preview/
+*.log
+crumbs.bin
