@@ -72,7 +72,7 @@ changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
 |---|---|
-| `scale` | Internal resolution. `2` (the default) holds 60 fps in 1v1 and four-player matches. `4` (sharper edges) also runs smoothly: matches, including four players, and the menus hold 60 fps; only the results screen after a match dips, to the high 40s. `1`, `1.5` and `3` also work; `3` has had little testing. |
+| `scale` | Internal resolution. `2` (the default) holds 60 fps in 1v1 and four-player matches. `4` (sharper edges) also runs smoothly: matches, including four players, and the menus hold 60 fps; only the results screen after a match dips, to the high 40s. `1`, `1.5` and `3` also work. |
 | `rumble` | Controller rumble strength: `0` = off (default), `50` = normal, `100` = strongest. Melee's own per-player Rumble option also applies. |
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
