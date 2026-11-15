@@ -122,5 +122,4 @@ Super Smash Bros. Melee is the property of Nintendo / HAL Laboratory. This proje
 
 ## How this port was made
 
-Most of the Switch 2 port's code was written by Claude, Anthropic's AI model, working with Prlxd, who
-directed the project and the launcher's design, and tested every build on real hardware.
+Most of the Switch 2 port's code was written by Claude, Anthropic's AI model.
