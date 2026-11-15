@@ -12,7 +12,7 @@ ROWS=['Rumble','Tap jump','Scale','Logging']
 VALUES=['On','Off','1x','1.5x','2x','3x','4x']
 DESC=['Controller rumble. Melee’s own per-player Rumble option also applies.',
       'On: pushing the stick up jumps, as in the original game. Off: only X and Y jump.',
-      'Internal resolution. 2x holds 60 fps in 1v1, 1.5x for four players. 3x and 4x are experimental.',
+      'Internal resolution. Every setting holds 60 fps in matches; at 4x only the results screen dips.',
       'Writes boot.log and gl.log to sdmc:/melee/, for reporting a problem.']
 Y0,DY,LABEL_RX,VALUE_CX=230,74,600,790
 def canvas(): return Image.new('RGBA',(W*K,H*K),(0,0,0,0))

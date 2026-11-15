@@ -3303,7 +3303,7 @@ index 0000000..e5d852b
 +} // namespace linux_renderer
 diff --git a/port/switch2/host_switch.cpp b/port/switch2/host_switch.cpp
 new file mode 100644
-index 0000000..bbe7342
+index 0000000..12dfbcf
 --- /dev/null
 +++ b/port/switch2/host_switch.cpp
 @@ -0,0 +1,1647 @@
@@ -4395,7 +4395,7 @@ index 0000000..bbe7342
 +  cfg = config; count = {}; game = {}; audio = {}; stop_requested = false; stop_code = 0;
 +  resimulating = false; next_retrace = ticks_per_frame; sound = 1; progressive = 0;
 +  log_file = g_logging ? std::fopen(cfg.log_path.c_str(), "w") : nullptr;
-+  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 71, threaded graphics + sound, widescreen, 20XX)");
++  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 72, threaded graphics + sound, widescreen, 20XX)");
 +  // The call trace slows the game to a crawl (a flushed SD write per call): only on request.
 +  if (FILE* on = std::fopen("sdmc:/melee/trace.on", "r")) {
 +    std::fclose(on);
@@ -4655,7 +4655,7 @@ index 0000000..bbe7342
 +  if (FILE* f = std::fopen("sdmc:/melee/launches.txt", "a")) {
 +    const time_t now = std::time(nullptr);
 +    char when[32]; std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-+    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 71)\n", when, what);
++    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 72)\n", when, what);
 +    std::fclose(f);
 +  }
 +}
