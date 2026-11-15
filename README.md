@@ -72,7 +72,7 @@ changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
 |---|---|
-| `scale` | Internal resolution. `2` (the default) holds 60 fps in 1v1 and four-player matches. `1`, `1.5`, `3` and `4` also work; `3` and `4` are experimental: matches hold 60 at `4`, but the results screen can dip. |
+| `scale` | Internal resolution. `2` (the default) holds 60 fps in 1v1 and four-player matches. `4` (sharper edges) also runs smoothly: matches, including four players, and the menus hold 60 fps; only the results screen after a match dips, to the high 40s. `1`, `1.5` and `3` also work; `3` has had little testing. |
 | `rumble` | Controller rumble strength: `0` = off (default), `50` = normal, `100` = strongest. Melee's own per-player Rumble option also applies. |
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
@@ -82,7 +82,7 @@ changed from the picker's options screen (**X**).
 
 ## Known issues
 
-- At `scale=4`, the results screen after a match can drop into the high 40s. Matches are not affected.
+- At `scale=4`, the results screen after a match drops into the high 40s. Everything else at 4x, matches included, runs at 60 fps.
 - TE's input display and quieter Dream Land 64 music are not implemented.
 - No online play.
 - Tested in handheld and docked mode, mostly in VS mode. Single-player modes have had little testing.
