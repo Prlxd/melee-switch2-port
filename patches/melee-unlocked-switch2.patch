@@ -3791,7 +3791,7 @@ index 0000000..e5d852b
 +} // namespace linux_renderer
 diff --git a/port/switch2/host_switch.cpp b/port/switch2/host_switch.cpp
 new file mode 100644
-index 0000000..e2e6010
+index 0000000..307c95f
 --- /dev/null
 +++ b/port/switch2/host_switch.cpp
 @@ -0,0 +1,1691 @@
@@ -3804,7 +3804,7 @@ index 0000000..e2e6010
 +#include <zlib.h>
 +#include "launcher_art.h"
 +#include "options_art.h"   // the options screen (launcher/options_art.py)
-+#define MU_APP_VERSION "0.8.3"
++#define MU_APP_VERSION "0.8.4"
 +extern "C" int mu_crumbs_on;   // 1.0 = fully working; also APP_VERSION in the NRO Makefile
 +#ifdef MU_SWITCH_GRAPHICS
 +#include "gx_shader.h"
@@ -4901,7 +4901,7 @@ index 0000000..e2e6010
 +  // other launch).
 +  if (std::getenv("MU_TEXTURE_PACKS")) gx::texpack::start_decoders();
 +#endif
-+  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 84, threaded graphics + sound, widescreen, 20XX)");
++  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 85, threaded graphics + sound, widescreen, 20XX)");
 +  // The call trace slows the game to a crawl (a flushed SD write per call): only on request.
 +  if (FILE* on = std::fopen("sdmc:/melee/trace.on", "r")) {
 +    std::fclose(on);
@@ -5181,7 +5181,7 @@ index 0000000..e2e6010
 +  if (FILE* f = std::fopen("sdmc:/melee/launches.txt", "a")) {
 +    const time_t now = std::time(nullptr);
 +    char when[32]; std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-+    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 84)\n", when, what);
++    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 85)\n", when, what);
 +    std::fclose(f);
 +  }
 +}

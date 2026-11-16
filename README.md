@@ -5,7 +5,7 @@ Based on [melee-unlocked](https://github.com/hero88go/melee-unlocked).
 
 ![The game picker](docs/picker.png)
 
-**Status: beta (v0.8.3).** Offline play only for now. Online play through Slippi is planned for a future release.
+**Status: beta (v0.8.4).** Offline play only for now. Online play through Slippi is planned for a future release.
 
 ## You must supply your own game
 

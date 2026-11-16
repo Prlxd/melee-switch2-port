@@ -53,9 +53,9 @@ port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file).
    `POPPINS_DIR` to its folder if it is not in `/usr/share/fonts/truetype/google-fonts`):
    ```sh
    L=/path/to/this-repo/switch2/launcher
-   python3 $L/make.py 0.8.3 .             # the game picker: port/switch2/launcher_art.h, and icon.jpg
-   python3 $L/options_art.py 0.8.3 .      # the options screen: port/switch2/options_art.h
-   python3 $L/prewarm_screen.py 0.8.3 .   # "Preparing graphics": port/switch2/prewarm_art.h
+   python3 $L/make.py 0.8.4 .             # the game picker: port/switch2/launcher_art.h, and icon.jpg
+   python3 $L/options_art.py 0.8.4 .      # the options screen: port/switch2/options_art.h
+   python3 $L/prewarm_screen.py 0.8.4 .   # "Preparing graphics": port/switch2/prewarm_art.h
    ```
    `art.py` redraws the two picker panels (`art/left.png`, `art/right.png`); they are already in the
    repository, so it is optional.
