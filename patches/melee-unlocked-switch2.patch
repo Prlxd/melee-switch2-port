@@ -1,8 +1,18 @@
 diff --git a/port/linux/renderer_gl.cpp b/port/linux/renderer_gl.cpp
-index 004bbdc..a05c37c 100644
+index 004bbdc..4ea9e2d 100644
 --- a/port/linux/renderer_gl.cpp
 +++ b/port/linux/renderer_gl.cpp
-@@ -47,9 +47,15 @@
+@@ -16,6 +16,9 @@
+ #endif
+ #include "gx_shader.h"
+ #include "gx_texture.h"
++#ifdef MU_SWITCH2
++#include "texture_pack.h"   // texture packs (hdtextures=1)
++#endif
+ #ifdef GX_PC_SETTINGS   // the full game (port/linux/full): texture packs and F2 captures
+ #include "texture_pack.h"
+ #include "video_background.h"
+@@ -47,9 +50,15 @@
  #include <iomanip>
  #include <sstream>
  #include <stdexcept>
@@ -18,7 +28,7 @@ index 004bbdc..a05c37c 100644
  #include <atomic>
  #include <condition_variable>
  #include <deque>
-@@ -58,8 +64,10 @@
+@@ -58,8 +67,10 @@
  #include <cerrno>
  #include <chrono>
  #include <fcntl.h>
@@ -29,7 +39,7 @@ index 004bbdc..a05c37c 100644
  #include <unistd.h>
  
  extern char** environ;
-@@ -95,6 +103,19 @@ void replace_all(std::string& text, const std::string& from, const std::string&
+@@ -95,6 +106,19 @@ void replace_all(std::string& text, const std::string& from, const std::string&
    size_t at = 0;
    while ((at = text.find(from, at)) != std::string::npos) { text.replace(at, from.size(), to); at += to.size(); }
  }
@@ -49,7 +59,7 @@ index 004bbdc..a05c37c 100644
  void run_tool(std::vector<std::string> args, const std::filesystem::path& log) {
    std::vector<char*> argv;
    for (auto& a : args) argv.push_back(a.data());
-@@ -140,6 +161,7 @@ void translate_shader(GLenum stage, const std::string& source, const std::filesy
+@@ -140,6 +164,7 @@ void translate_shader(GLenum stage, const std::string& source, const std::filesy
    std::error_code ec;
    std::filesystem::remove(input, ec); std::filesystem::remove(spv, ec); std::filesystem::remove(log, ec);
  }
@@ -57,7 +67,18 @@ index 004bbdc..a05c37c 100644
  #endif
  GLuint compile_gl(GLenum stage, const std::string& source) {
  #ifdef __APPLE__
-@@ -210,11 +232,15 @@ struct GlProbeScope {
+@@ -195,6 +220,10 @@ struct Texture {
+   GLuint id = 0, fbo = 0;
+   uint32_t width = 0, height = 0, levels = 1;
+   uint64_t used = 0, bytes = 0;
++#ifdef MU_SWITCH2
++  bool replaced = false;      // holds a texture pack picture (counted against its budget)
++  std::string pending;        // the game's own picture for now; the pack's, under this name, is decoding
++#endif
+ };
+ 
+ #ifdef __APPLE__
+@@ -210,11 +239,15 @@ struct GlProbeScope {
    ~GlProbeScope() { if (total) *total += std::chrono::duration<double, std::milli>(Clock::now() - start).count(); }
  };
  struct GlProbe {
@@ -75,7 +96,7 @@ index 004bbdc..a05c37c 100644
  };
  // Each entry describes a call actually emitted since the last external GL boundary.
  // Unknown differs from every value, including zero/disabled and an empty texture.
-@@ -246,15 +272,21 @@ struct ProgramAttributes {
+@@ -246,15 +279,21 @@ struct ProgramAttributes {
  };
  class Renderer final : public gx::Backend {
   public:
@@ -100,7 +121,7 @@ index 004bbdc..a05c37c 100644
      std::filesystem::create_directories(cache_);
      context_ = SDL_GL_CreateContext(window_);
      if (!context_) throw std::runtime_error(std::string("SDL OpenGL context: ") + SDL_GetError());
-@@ -269,6 +301,9 @@ class Renderer final : public gx::Backend {
+@@ -269,6 +308,9 @@ class Renderer final : public gx::Backend {
      glGenBuffers(1, &vertices_); glGenBuffers(1, &indices_); glGenBuffers(2, uniform_);
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof(gx::VSConstants), nullptr, GL_STREAM_DRAW);
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof(gx::PSConstants), nullptr, GL_STREAM_DRAW);
@@ -110,7 +131,7 @@ index 004bbdc..a05c37c 100644
      glGenFramebuffers(1, &efb_); glBindFramebuffer(GL_FRAMEBUFFER, efb_);
      glGenTextures(1, &color_); glBindTexture(GL_TEXTURE_2D, color_);
      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-@@ -319,7 +354,13 @@ void main() {
+@@ -319,7 +361,13 @@ void main() {
                   sync_shaders_ ? "synchronous (diagnostic)" : "asynchronous (one worker)", compile_budget_ms_);
  #endif
    }
@@ -124,7 +145,7 @@ index 004bbdc..a05c37c 100644
  #ifdef YOUGAME_AGENT_TEST_HOOK
      yougame::agent_present::recorder().stop(); // Drain evidence before the host's exit path.
  #endif
-@@ -335,7 +376,9 @@ void main() {
+@@ -335,7 +383,9 @@ void main() {
      stop_translators();
  #endif
      if (!context_) return;
@@ -134,7 +155,7 @@ index 004bbdc..a05c37c 100644
      for (auto& p : attribute_locations_) glDeleteVertexArrays(1, &p.second.vao);
      for (auto& p : programs_) glDeleteProgram(p.second);
      for (auto& p : shaders_) glDeleteShader(p.second);
-@@ -345,7 +388,10 @@ void main() {
+@@ -345,7 +395,10 @@ void main() {
      glDeleteProgram(copy_program_); glDeleteTextures(1, &color_); glDeleteTextures(1, &depth_);
      glDeleteTextures(1, &last_color_); glDeleteFramebuffers(1, &last_frame_);
      glDeleteFramebuffers(1, &efb_); glDeleteBuffers(1, &vertices_); glDeleteBuffers(1, &indices_);
@@ -146,7 +167,7 @@ index 004bbdc..a05c37c 100644
    }
    void presentation_stats(uint32_t* frames, uint32_t* pipes, uint32_t* textures) const override {
      if (frames) *frames = presented_;
-@@ -362,6 +408,32 @@ void main() {
+@@ -362,6 +415,32 @@ void main() {
      if (hooks_.drawable_size && !hooks_.drawable_size(&drawable_w, &drawable_h)) return;
  #endif
      source_retrace_ = frame.source_retrace; // Includes shader work before drawing and after the swap.
@@ -179,7 +200,7 @@ index 004bbdc..a05c37c 100644
  #ifdef __APPLE__
      Clock::time_point probe_start;
      if (probe_.on) { probe_.reset(); probe_start = Clock::now(); }
-@@ -369,7 +441,15 @@ void main() {
+@@ -369,7 +448,15 @@ void main() {
      drain_programs();
  #endif
      if (hooks_.frame_begin) { hooks_.frame_begin(frame); invalidate_state(); }
@@ -195,7 +216,7 @@ index 004bbdc..a05c37c 100644
      const int lightweight = hooks_.options ? hooks_.options->lightweight : 0;
      gx::set_lightweight_level(lightweight);
      if (hooks_.options) gx::publish_look(*hooks_.options);
-@@ -415,7 +495,8 @@ void main() {
+@@ -415,7 +502,8 @@ void main() {
      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_);
      glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniform_[0]); glBindBufferBase(GL_UNIFORM_BUFFER, 1, uniform_[1]);
      gx::set_main_projection(gx::frame_scene_draw(frame));
@@ -205,7 +226,7 @@ index 004bbdc..a05c37c 100644
  #ifdef GX_PC_SETTINGS
      // Menu video backgrounds: the character select's video goes in after Melee's untextured
      // animated backdrop, the stage select's right after the learned backdrop draw (as on Windows).
-@@ -443,6 +524,9 @@ void main() {
+@@ -443,6 +531,9 @@ void main() {
          draw_video_slot_ = -1;
  #endif
          draw(frame, dc, overrides ? overrides + command.index : nullptr, vertex_offsets_[command.index]);
@@ -215,7 +236,7 @@ index 004bbdc..a05c37c 100644
  #ifdef GX_PC_SETTINGS
          if (fullscreen && screen && fullscreen_slot == 1 && draw_video_slot_ == 1 && !background_drawn) {
            draw_video_layer(fullscreen, fullscreen_slot, *screen);
-@@ -454,9 +538,17 @@ void main() {
+@@ -454,9 +545,17 @@ void main() {
          if (c.to_xfb) { if (!skip_) { capture_sequence_ = frame.sequence; present(c, frame); } }
          else copy(c);
          if (c.clear) clear(c);
@@ -233,7 +254,7 @@ index 004bbdc..a05c37c 100644
  #ifdef __APPLE__
      report_skips(false);
      if (probe_.on) {
-@@ -530,7 +622,7 @@ void main() {
+@@ -530,7 +629,7 @@ void main() {
      glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_);
      auto pixel = [this](int x, int y) {
        std::array<uint8_t, 4> color{};
@@ -242,7 +263,7 @@ index 004bbdc..a05c37c 100644
        return color;
      };
      const auto background = pixel(0, 0), red = pixel(150, 400), blue = pixel(320, 200), texture = pixel(500, 275);
-@@ -582,6 +674,10 @@ void main() {
+@@ -582,6 +681,10 @@ void main() {
      const auto partial = path.string() + "." + std::to_string(getpid());
      { std::ofstream f(partial, std::ios::binary); f.write(data.data(), static_cast<std::streamsize>(data.size())); if (!f) return; }
      std::error_code ec; std::filesystem::rename(partial, path, ec);
@@ -253,7 +274,7 @@ index 004bbdc..a05c37c 100644
      if (ec) std::filesystem::remove(partial, ec);
    }
    // MELEE_TEST_SHOT=<dir>:<n>,<n>,...: save the picture presented to the window (after scaling and letterbox) at
-@@ -710,28 +806,146 @@ void main() {
+@@ -710,28 +813,150 @@ void main() {
      return spent();
    }
  #else
@@ -280,6 +301,10 @@ index 004bbdc..a05c37c 100644
 +    return true;
 +  }
 +  void prewarm() {
++#ifdef MU_SWITCH2
++    // Texture packs: the folder is indexed here, before the game starts (file names only).
++    if (const char* v = std::getenv("MU_TEXTURE_PACKS"); v && v[0] == '1') gx::texpack::configure(true, false);
++#endif
 +    std::vector<ProgramRecipe> list;
 +    read_recipes(read_text(cache_ / "recipes.bin"), list);
 +#ifdef MU_SWITCH2
@@ -341,15 +366,15 @@ index 004bbdc..a05c37c 100644
 -    saved_recipes_ = recipes_.size();
 +#ifdef MU_SWITCH2
 +    prewarm_screen_close();
-+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+-    shader_log("opengl: prewarmed %zu programs from %zu recipes before guest startup in %.1f ms%s",
+-                 programs_.size(), count, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +    save_recipes();   // this resolution's list now holds the borrowed and built-in recipes too
 +    shader_log("opengl: prewarmed %zu programs from %zu recipes (%zu from other resolutions, %zu built in) before guest startup in %.1f ms%s",
 +                 programs_.size(), seen.size(), borrowed, seeded, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +#else
 +    save_recipes();   // this resolution's list now holds the borrowed recipes too
-     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
--    shader_log("opengl: prewarmed %zu programs from %zu recipes before guest startup in %.1f ms%s",
--                 programs_.size(), count, ms, binaries_ ? "" : " (driver keeps no program binaries)");
++    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 +    shader_log("opengl: prewarmed %zu programs from %zu recipes (%zu from other resolutions) before guest startup in %.1f ms%s",
 +                 programs_.size(), seen.size(), borrowed, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +#endif
@@ -399,18 +424,18 @@ index 004bbdc..a05c37c 100644
 +    glBlitFramebuffer(bw - cap, 720, bw, 720 + bh, sx(f - cap), y1, sx(f), y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 +    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 +    SDL_GL_SwapWindow(window_);
-+  }
+   }
 +  void prewarm_screen_close() {
 +    if (prewarm_fbo_) glDeleteFramebuffers(1, &prewarm_fbo_);
 +    if (prewarm_tex_) glDeleteTextures(1, &prewarm_tex_);
 +    prewarm_fbo_ = prewarm_tex_ = 0;
 +    glClearColor(0, 0, 0, 1);
-   }
++  }
 +#endif
  #endif
    void save_recipes() {
      if (recipes_.size() == saved_recipes_) return;
-@@ -799,6 +1013,9 @@ void main() {
+@@ -799,6 +1024,9 @@ void main() {
      }
    }
    GLuint program(const gx::DrawCall& dc) {
@@ -420,7 +445,7 @@ index 004bbdc..a05c37c 100644
      const auto vs = gx::make_vs_uid(dc); const auto ps = gx::make_ps_uid(dc);
      ProgramKey key{vs.hash(), ps.hash()};
      if (auto i = programs_.find(key); i != programs_.end()) return i->second;
-@@ -927,7 +1144,11 @@ void main() {
+@@ -927,7 +1155,11 @@ void main() {
        {
          std::lock_guard<std::mutex> lock(translate_mutex_);
          failed_before = translate_failed_.count(key) != 0;
@@ -432,7 +457,66 @@ index 004bbdc..a05c37c 100644
            if (translate_pending_.insert(key).second) {
              translate_jobs_.push_back({key, stage, std::move(source), prefix, output});
              translate_cv_.notify_one();
-@@ -1162,7 +1383,7 @@ void main() {
+@@ -1056,7 +1288,15 @@ void main() {
+ #endif
+     const uint64_t desc[] = {t.data->hash, t.width, t.height, t.format, t.tlut_format, t.mip_levels};
+     const uint64_t key = gx::look_key(gx::hash_bytes(desc, sizeof desc), look_surface_);
+-    if (auto i = textures_.find(key); i != textures_.end()) { i->second.used = sequence_; return i->second.id; }
++    if (auto i = textures_.find(key); i != textures_.end()) {
++#ifdef MU_SWITCH2
++      // Drawn with the game's own picture while the pack's decoded in the background: rebuild it
++      // with the pack's as soon as that is ready.
++      if (!i->second.pending.empty() && gx::texpack::ready(i->second.pending)) { invalidate_state(); destroy(i->second); textures_.erase(i); }
++      else
++#endif
++      { i->second.used = sequence_; return i->second.id; }
++    }
+     if (probe_.on) ++probe_.uploads;
+     invalidate_state(); // Allocation binds on the currently active texture unit.
+     if (auto small = gx::look_replacement(t, look_surface_)) {   // the look's treated copy, one level (gx_retro.h)
+@@ -1093,6 +1333,41 @@ void main() {
+         }
+       }
+     }
++#endif
++#ifdef MU_SWITCH2
++    // Texture packs (hdtextures=1 in config.ini; packs in sdmc:/melee/textures/<pack>): Dolphin's
++    // name for this texture, then the pack's picture. It is decoded in the background (three
++    // threads) and replaces the game's own picture a moment later: decoding on this thread froze
++    // menus for 0.3-0.4 s and a match's start for up to 1.5 s.
++    if (gx::texpack::enabled()) {
++      pack_name = gx::texpack::base_name(t, *t.data);
++      if (gx::texpack::has(pack_name)) {
++        constexpr uint64_t budget = 1024ull << 20;
++        std::shared_ptr<const gx::texpack::Replacement> r;
++        if (gx::texpack::synchronous() || gx::texpack::ready(pack_name)) {
++          r = gx::texpack::load(pack_name, replacement_bytes_ < budget ? budget - replacement_bytes_ : 0);
++          gx::texpack::note_lookup(r != nullptr);
++        } else {
++          gx::texpack::request(pack_name);
++          entry.pending = pack_name;
++        }
++        if (r) {
++          glGenTextures(1, &entry.id); glBindTexture(GL_TEXTURE_2D, entry.id);
++          entry.width = r->width; entry.height = r->height; entry.levels = std::max(1u, r->levels);
++          for (uint32_t level = 0; level < entry.levels && level < 16; ++level) {
++            glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA8, r->level_width[level], r->level_height[level], 0, GL_RGBA,
++                         GL_UNSIGNED_BYTE, r->pixels.data() + r->level_offset[level]);
++            entry.bytes += static_cast<uint64_t>(r->level_width[level]) * r->level_height[level] * 4;
++          }
++          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, entry.levels - 1);
++          entry.replaced = true;
++          replacement_bytes_ += entry.bytes;
++
++          gx::texpack::release(pack_name);   // on the GPU now; the decoded copy is not needed
++          const GLuint id = entry.id; textures_.emplace(key, entry); return id;
++        }
++      }
++    }
+ #endif
+     glGenTextures(1, &entry.id); glBindTexture(GL_TEXTURE_2D, entry.id);
+     const uint8_t* data = t.data->image.data(); size_t remaining = t.data->image.size();
+@@ -1162,7 +1437,7 @@ void main() {
      const int r = std::clamp(int(gx::bits(br, 12, 12)) - ox - 341, 0, gx::EFB_WIDTH), b = std::clamp(int(gx::bits(br, 0, 12)) - oy - 341, 0, gx::EFB_HEIGHT);
      if (r <= l || b <= t) return;
      capability(emitted_.scissor, GL_SCISSOR_TEST, true);
@@ -441,7 +525,7 @@ index 004bbdc..a05c37c 100644
      if (emitted_.scissor_rect.changed(rect)) glScissor(rect[0], rect[1], rect[2], rect[3]);
      const auto blend = dc.bp.blendmode(), zmode = dc.bp.zmode(), cull = dc.bp.cullmode();
      const GLenum src[] = {GL_ZERO,GL_ONE,GL_DST_COLOR,GL_ONE_MINUS_DST_COLOR,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_DST_ALPHA,GL_ONE_MINUS_DST_ALPHA};
-@@ -1198,8 +1419,24 @@ void main() {
+@@ -1198,8 +1473,24 @@ void main() {
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof pc, &pc, GL_STREAM_DRAW);
      }
  #else
@@ -466,7 +550,7 @@ index 004bbdc..a05c37c 100644
  #endif
      const bool flat = gx::lightweight_flat(lightweight_filter_, dc);   // "Lightweight" 3+: one white texel instead
      look_surface_ = gx::look_surface(lightweight_filter_, dc);
-@@ -1223,14 +1460,21 @@ void main() {
+@@ -1223,14 +1514,21 @@ void main() {
      } else topology = gx::append_segment_indices(index_scratch_, dc.primitive, dc.vertex_count, vertex_override ? uint32_t(vertex_override) : dc.first_vertex);
      if (index_scratch_.empty()) return;
      if (probe_.on) probe_.index_bytes += index_scratch_.size() * sizeof(uint32_t);
@@ -490,7 +574,7 @@ index 004bbdc..a05c37c 100644
      if (wire) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
    }
    // MSAA (Anti-aliasing 2x/4x/8x MSAA): draws go to multisampled renderbuffers, blitted into the EFB
-@@ -1279,7 +1523,7 @@ void main() {
+@@ -1279,7 +1577,7 @@ void main() {
    void clear(const gx::EfbCopy& c) {
      invalidate_state();
      glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo()); glEnable(GL_SCISSOR_TEST);
@@ -499,7 +583,7 @@ index 004bbdc..a05c37c 100644
      glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_TRUE);
      const uint32_t clear_colour = gx::look_clear_colour(lightweight_filter_.in_match, c.clear_color);   // the look's background
      glClearColor(((clear_colour >> 16) & 255) / 255.0f, ((clear_colour >> 8) & 255) / 255.0f, (clear_colour & 255) / 255.0f, (clear_colour >> 24) / 255.0f);
-@@ -1291,7 +1535,7 @@ void main() {
+@@ -1291,7 +1589,7 @@ void main() {
      GlProbeScope cost(probe_.slot(probe_.copy));
      if (!c.src_w || !c.src_h) return;
      resolve_msaa();
@@ -508,7 +592,7 @@ index 004bbdc..a05c37c 100644
      auto& e = copies_[c.dest_addr & 0x3FFFFFFFu];
      if (!e.id || e.width != w || e.height != h) {
        if (probe_.on) ++probe_.copy_allocs;
-@@ -1346,10 +1590,15 @@ void main() {
+@@ -1346,10 +1644,15 @@ void main() {
      glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_);
      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, last_frame_);
      glBlitFramebuffer(0, 0, width_, height_, 0, 0, width_, height_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -524,7 +608,7 @@ index 004bbdc..a05c37c 100644
      glDisable(GL_SCISSOR_TEST); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
      const float fill = test_fill > 0 ? 1.0f : 0.0f; glClearColor(fill, fill, fill, 1); glClear(GL_COLOR_BUFFER_BIT);
-@@ -1675,9 +1924,9 @@ void main() {
+@@ -1675,9 +1978,9 @@ void main() {
      glBindVertexArray(vao_);
      glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo());
      glEnable(GL_SCISSOR_TEST);
@@ -537,7 +621,33 @@ index 004bbdc..a05c37c 100644
      const float rect[4] = {1.0f, -1.0f, 0.0f, 1.0f};
      copy_quad(id, rect);
      glBindVertexArray(vao_);
-@@ -1738,7 +1987,265 @@ void main() {
+@@ -1712,6 +2015,11 @@ void main() {
+     if (sequence_ % 120) return;
+     invalidate_state(); // Deleting a bound texture also changes the binding.
+     for (auto i = textures_.begin(); i != textures_.end();) {
++#ifdef MU_SWITCH2
++      // A texture pack picture stays while it fits the budget below: dropped after 3 s unused, it
++      // had to be decoded again each time the character select or stage select came back.
++      if (i->second.replaced) { ++i; continue; }
++#endif
+       if (i->second.used + 180 < sequence_) { destroy(i->second); i = textures_.erase(i); } else ++i;
+     }
+     for (auto i = copies_.begin(); i != copies_.end();) {
+@@ -1719,7 +2027,13 @@ void main() {
+     }
+     uint64_t bytes = 0;
+     for (const auto& item : textures_) bytes += item.second.bytes;
++#ifdef MU_SWITCH2
++    replacement_bytes_ = 0;   // what the pack's pictures hold now, not since launch
++    for (const auto& item : textures_) if (item.second.replaced) replacement_bytes_ += item.second.bytes;
++    const uint64_t budget = gx::texpack::enabled() ? (1024ull << 20) : (256ull << 20);
++#else
+     constexpr uint64_t budget = 256ull << 20;
++#endif
+     if (bytes > budget) {
+       std::vector<std::pair<uint64_t, uint64_t>> oldest;
+       for (const auto& item : textures_)
+@@ -1738,7 +2052,265 @@ void main() {
    EmittedState emitted_;
    std::unordered_map<GLuint, ProgramAttributes> attribute_locations_;
    GLint copy_source_ = -1, copy_kind_ = -1, copy_rect_ = -1;
@@ -804,7 +914,7 @@ index 004bbdc..a05c37c 100644
    GLuint vao_ = 0, vertices_ = 0, indices_ = 0, uniform_[2]{}, efb_ = 0, color_ = 0, depth_ = 0, copy_program_ = 0;
    GLuint msaa_fbo_ = 0, msaa_rb_[2]{};
    int msaa_samples_ = 1;
-@@ -1825,7 +2332,7 @@ void main() {
+@@ -1825,7 +2397,7 @@ void main() {
  };
  } // namespace
  
@@ -2634,6 +2744,384 @@ index f325d66..5b42ff8 100644
  static inline unsigned char _BitScanForward64(unsigned long* index, unsigned long long value) {
    if (!value) return 0;
    *index = static_cast<unsigned long>(__builtin_ctzll(value));
+diff --git a/port/runtime/gx/texture_pack.cpp b/port/runtime/gx/texture_pack.cpp
+index e127bc5..13a4aa9 100644
+--- a/port/runtime/gx/texture_pack.cpp
++++ b/port/runtime/gx/texture_pack.cpp
+@@ -12,13 +12,19 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ #define NOMINMAX
+ #include "test_env.h"
++#ifdef MU_SWITCH2
++#include <switch.h>   // svcGetInfo, for the memory budget
++#else
+ #include <windows.h>
++#endif
+ 
+ #include "texture_pack.h"
+ 
+ #include <algorithm>
+ #include <thread>
++#ifndef MU_SWITCH2
+ #include <shellapi.h>
++#endif
+ #include <atomic>
+ #include <chrono>
+ #include <cctype>
+@@ -146,18 +152,27 @@ State g;
+ 
+ // A single decoded image is capped so a hostile or broken PNG cannot ask for gigabytes. 4096x4096
+ // RGBA is 64 MB, far above anything a Melee pack needs (the largest native texture is 1024x1024).
+-constexpr uint32_t MAX_DIM = 4096;
++#ifdef MU_SWITCH2
++constexpr uint32_t MAX_DIM = 16384;   // larger pictures are halved after decoding (decode_entry)
++#else
++constexpr uint32_t MAX_DIM = 8192;
++#endif
+ constexpr uint64_t MAX_IMAGE_BYTES = 64ull * 1024 * 1024;
+ constexpr uint64_t MAX_INDEX_FILES = 500000;
+ 
+ std::filesystem::path exe_directory() {
++#ifdef MU_SWITCH2
++  return "sdmc:/melee";   // packs in sdmc:/melee/textures/<pack> or sdmc:/melee/Load/Textures/GALE01
++#endif
+ #ifdef __APPLE__
+   return std::filesystem::current_path();  // user-owned texture packs and dumps
+ #endif
++#ifndef MU_SWITCH2
+   wchar_t buffer[32768];
+   DWORD n = GetModuleFileNameW(nullptr, buffer, (DWORD)std::size(buffer));
+   if (!n || n >= std::size(buffer)) return std::filesystem::path(".");
+   return std::filesystem::path(std::wstring(buffer, n)).parent_path();
++#endif
+ }
+ 
+ // Dolphin looks in Load/Textures/<GameID> and falls back to the three character region free ID
+@@ -177,7 +192,11 @@ std::vector<std::filesystem::path> find_roots(const std::filesystem::path& base)
+   std::vector<std::filesystem::path> out;
+   std::error_code ec;
+   if (auto dolphin = find_root(base); !dolphin.empty()) out.push_back(dolphin);
++#ifdef MU_SWITCH2
++  std::filesystem::path plain = base / "textures";
++#else
+   std::filesystem::path plain = base / "TexturePacks";
++#endif
+   if (std::filesystem::is_directory(plain, ec)) out.push_back(plain);
+   return out;
+ }
+@@ -512,6 +531,7 @@ struct CacheEntry {
+ std::mutex g_cache_mutex;
+ std::unordered_map<std::string, CacheEntry> g_cache;
+ uint64_t g_cache_bytes = 0, g_cache_clock = 0;
++std::atomic<bool> g_index_ready{false};   // set once configure() has the whole index
+ uint64_t g_cache_budget = 0;   // set by prefetch_begin, or the first time the cache is filled
+ // Decoded PNGs are CPU-side staging data, and on an integrated GPU they compete with the GPU for
+ // the same physical RAM. Keep the old 1.5 GB ceiling on ordinary machines, but do not reserve that
+@@ -522,6 +542,12 @@ constexpr uint64_t kMaxCacheBudget = 1536ull * 1024 * 1024;
+ constexpr uint64_t kMinCacheBudget = 256ull * 1024 * 1024;
+ 
+ uint64_t prefetch_cache_budget() {
++#ifdef MU_SWITCH2
++  // Decoded pictures waiting for upload, including the menu sets decoded ahead (serve). The renderer
++  // uploads a picture and lets it go (release). The program has about 9 GB of heap (the system's
++  // own "used" count includes the whole heap from the start, so it cannot size this).
++  return 1024ull << 20;
++#else
+   MEMORYSTATUSEX memory{};
+   memory.dwLength = sizeof memory;
+   if (!GlobalMemoryStatusEx(&memory) || !memory.ullTotalPhys) return kMaxCacheBudget;
+@@ -529,6 +555,7 @@ uint64_t prefetch_cache_budget() {
+   // commit: a machine with most of its memory in use at launch has no room for the full budget.
+   const uint64_t free_now = std::min<uint64_t>(memory.ullAvailPhys, memory.ullAvailPageFile) / 3;
+   return std::clamp<uint64_t>(std::min<uint64_t>(memory.ullTotalPhys / 4, free_now), kMinCacheBudget, kMaxCacheBudget);
++#endif
+ }
+ 
+ void clear_cache();   // defined with load()
+@@ -562,6 +589,7 @@ bool configure(bool on, bool dump) {
+   g.dump = dump;
+   if (!on) clear_cache();
+   if (on && g.index.empty()) build_index();
++  g_index_ready.store(on, std::memory_order_release);   // the main thread's decode-ahead reads the index from here on
+   if (dump) {
+     g.dump_root = exe_directory() / "Dump" / "Textures" / "GALE01";
+     std::error_code ec;
+@@ -675,7 +703,9 @@ void open_packs_folder() {
+   std::filesystem::create_directories(folder, ec);
+   // A pack is a folder of PNGs and can be gigabytes; copying one into place would duplicate it for
+   // no reason. Opening the folder lets the player move or link their own copy where it belongs.
++#ifndef MU_SWITCH2
+   ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
++#endif
+   g.packs.clear();
+   g.index.clear();
+   build_index();   // pick up anything already there, so the list is right the moment it opens
+@@ -689,7 +719,9 @@ void open_dump_folder() {
+     host::log("textures: cannot open dump folder %s (%s)", folder.string().c_str(), ec.message().c_str());
+     return;
+   }
++#ifndef MU_SWITCH2
+   ShellExecuteW(nullptr, L"open", folder.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
++#endif
+ }
+ 
+ void prefetch_begin() {
+@@ -865,6 +897,28 @@ std::unique_ptr<Replacement> decode_entry_unchecked(const std::string& base, uin
+     return nullptr;
+   }
+ 
++#ifdef MU_SWITCH2
++  // Pictures larger than 2048 a side are halved until they fit (a 4096x4096 stage texture is 64 MB
++  // decoded, and the Switch shares its memory with the GPU). The pack's own mips, made for the full
++  // size, are then left out; the GPU's mips are not used for these.
++  bool shrunk = false;
++  while (w > 2048 || h > 2048) {
++    const uint32_t nw = std::max(1u, w / 2), nh = std::max(1u, h / 2);
++    std::vector<uint8_t> half((size_t)nw * nh * 4);
++    for (uint32_t y = 0; y < nh; ++y)
++      for (uint32_t x = 0; x < nw; ++x)
++        for (int c = 0; c < 4; ++c) {
++          const uint32_t x0 = std::min(2 * x, w - 1), x1 = std::min(2 * x + 1, w - 1);
++          const uint32_t y0 = std::min(2 * y, h - 1), y1 = std::min(2 * y + 1, h - 1);
++          const unsigned sum = level[((size_t)y0 * w + x0) * 4 + c] + level[((size_t)y0 * w + x1) * 4 + c] +
++                               level[((size_t)y1 * w + x0) * 4 + c] + level[((size_t)y1 * w + x1) * 4 + c];
++          half[((size_t)y * nw + x) * 4 + c] = (uint8_t)((sum + 2) / 4);
++        }
++    level.swap(half); w = nw; h = nh; shrunk = true;
++  }
++#else
++  const bool shrunk = false;
++#endif
+   out->width = w; out->height = h; out->levels = 1;
+   out->level_offset.push_back(0);
+   out->level_width.push_back(w);
+@@ -873,7 +927,7 @@ std::unique_ptr<Replacement> decode_entry_unchecked(const std::string& base, uin
+ 
+   // Extra levels are used only while they form the chain D3D expects. A pack that supplies a
+   // wrongly sized mip loses that level and everything past it, not the whole texture.
+-  for (uint32_t i = 1; i < entry.levels.size(); ++i) {
++  for (uint32_t i = 1; !shrunk && i < entry.levels.size(); ++i) {
+     const uint32_t want_w = std::max(1u, w >> i), want_h = std::max(1u, h >> i);
+     if (entry.levels[i].empty()) { ++g.mips_ignored; break; }
+     std::vector<uint8_t> mip;
+@@ -915,19 +969,146 @@ bool has(const std::string& base) {
+   return !entry.levels.empty() && !entry.levels[0].empty();
+ }
+ 
++void release(const std::string& base) {
++  std::lock_guard<std::mutex> lk(g_cache_mutex);
++  auto at = g_cache.find(base);
++  if (at == g_cache.end()) return;
++  g_cache_bytes -= at->second.image->pixels.size();
++  g_cache.erase(at);
++}
++
+ bool ready(const std::string& base) {
+   std::lock_guard<std::mutex> lk(g_cache_mutex);
+   return g_cache.count(base) != 0;
+ }
+ 
++void start_decoders_locked();
++
++// config.ini texdecoders=0 (MU_TEXTURE_DECODERS=0): no decoder threads; the renderer decodes each
++// picture itself when first drawn (menus hitch while pictures load). A test of whether the
++// threads are what closes the game at boot.
++bool synchronous() {
++  const char* v = std::getenv("MU_TEXTURE_DECODERS");
++  return v && v[0] == '0';
++}
++
++void start_decoders() {
++  std::lock_guard<std::mutex> lk(g_req_mutex);
++  start_decoders_locked();
++}
++
+ void request(const std::string& base) {
+   std::lock_guard<std::mutex> lk(g_req_mutex);
+   if (!g_req_pending.insert(base).second) return;
+   g_req_queue.push_back(base);
+   g_req_waiting.fetch_add(1, std::memory_order_relaxed);
++  start_decoders_locked();   // already running on Switch (started at boot); a no-op then
++  g_req_cv.notify_one();
++}
++
++// One queued picture: decoded into the waiting room, where the renderer finds it ready.
++void process_request(const std::string& name) {
++  host::optional_work("textures", [&] {
++    bool cached;
++    { std::lock_guard<std::mutex> lk(g_cache_mutex); cached = g_cache.count(name) != 0; }
++    if (!cached && has(name)) {
++      // Wanted right now: it goes in, and the least recently used others make room.
++      if (auto r = decode_entry(name, ~0ull)) {
++        std::lock_guard<std::mutex> lk(g_cache_mutex);
++        cache_put_locked(name, std::shared_ptr<const Replacement>(std::move(r)));
++      }
++    }
++  });
++  std::lock_guard<std::mutex> lk(g_req_mutex);
++  g_req_pending.erase(name);
++  g_req_waiting.fetch_sub(1, std::memory_order_relaxed);
++}
++
++#ifdef MU_SWITCH2
++// Switch default (no texdecoders setting, or texdecoders=main): the main thread decodes, between
++// its once-a-second watchdog checks. Threads of our own that read the pack crashed about every
++// other boot under kaiHEN (builds 74-79; texdecoders=0, no threads, never did), and the main
++// thread is otherwise idle while the game runs.
++bool main_thread_decodes() {
++  const char* v = std::getenv("MU_TEXTURE_DECODERS");
++  return !v || !v[0] || !std::strcmp(v, "main");
++}
++
++// Pictures decoded ahead, while nothing is asked for: the menu sets a player sees first (title,
++// character select, stage select, HUD, results), so they are ready when their screen opens rather
++// than arriving one by one. About 520 MB decoded for the Melee HD pack. Folder names as packs use
++// them; a pack laid out otherwise just loads as screens ask.
++std::vector<std::string> g_ahead;
++uint64_t g_ahead_started = 0, g_ahead_decoded = 0;
++size_t g_ahead_next = 0;
++bool g_ahead_listed = false;
++
++void list_ahead() {
++  g_ahead_listed = true;
++  static const char* const folders[] = {"/title/", "/css/", "/stage select/", "/hud/", "/results/", "/iss icons/"};
++  std::vector<std::pair<int, std::string>> picked;
++  for (const auto& kv : g.index) {
++    if (kv.second.levels.empty() || kv.second.levels[0].empty()) continue;
++    std::string path = kv.second.levels[0];
++    for (char& c : path) { if (c == '\\') c = '/'; c = (char)std::tolower((unsigned char)c); }
++    for (int k = 0; k < (int)(sizeof folders / sizeof *folders); ++k)
++      if (path.find(folders[k]) != std::string::npos) { picked.emplace_back(k, kv.first); break; }
++  }
++  std::stable_sort(picked.begin(), picked.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
++  for (auto& p : picked) g_ahead.push_back(std::move(p.second));
++  host::log("textures: %zu menu pictures will be decoded ahead", g_ahead.size());
++}
++
++bool serve(uint64_t timeout_ns) {
++  std::string name;
++  {
++    std::unique_lock<std::mutex> lk(g_req_mutex);
++    if (g_req_queue.empty()) {
++      lk.unlock();
++      if (!g_ahead_listed && g_index_ready.load(std::memory_order_acquire)) { list_ahead(); g_ahead_started = armGetSystemTick(); }
++      { std::lock_guard<std::mutex> c(g_cache_mutex); if (!g_cache_budget) g_cache_budget = prefetch_cache_budget(); }
++      while (g_ahead_next < g_ahead.size()) {   // nothing asked for: one picture ahead instead
++        const std::string& next = g_ahead[g_ahead_next++];
++        bool skip;
++        { std::lock_guard<std::mutex> c(g_cache_mutex); skip = g_cache.count(next) || g_cache_bytes > g_cache_budget * 3 / 4; }
++        { std::lock_guard<std::mutex> q(g_req_mutex); skip = skip || g_req_pending.count(next); }
++        if (skip) {
++          if (g_ahead_next == g_ahead.size())
++            host::log("textures: menu pictures decoded ahead (%llu in %.1f s)", (unsigned long long)g_ahead_decoded,
++                      armTicksToNs(armGetSystemTick() - g_ahead_started) / 1e9);
++          continue;
++        }
++        ++g_ahead_decoded;
++        host::optional_work("textures", [&] {
++          if (auto r = decode_entry(next, ~0ull)) {
++            std::lock_guard<std::mutex> c(g_cache_mutex);
++            if (!g_cache.count(next)) cache_put_locked(next, std::shared_ptr<const Replacement>(std::move(r)));
++          }
++        });
++        if (g_ahead_next == g_ahead.size())
++          host::log("textures: menu pictures decoded ahead (%llu in %.1f s)", (unsigned long long)g_ahead_decoded,
++                    armTicksToNs(armGetSystemTick() - g_ahead_started) / 1e9);
++        return true;
++      }
++      lk.lock();
++    }
++    if (!g_req_cv.wait_for(lk, std::chrono::nanoseconds(timeout_ns), [] { return !g_req_queue.empty(); })) return false;
++    name = std::move(g_req_queue.front());
++    g_req_queue.pop_front();
++  }
++  process_request(name);
++  return true;
++}
++#endif
++
++void start_decoders_locked() {
++  if (synchronous()) return;
++#ifdef MU_SWITCH2
++  if (main_thread_decodes()) return;
++#endif
+   if (!g_req_started) {
+     g_req_started = true;
+-    g_req_thread = std::thread([] {
++    auto worker = [] {
+       for (;;) {
+         std::string name;
+         {
+@@ -936,25 +1117,31 @@ void request(const std::string& base) {
+           name = std::move(g_req_queue.front());
+           g_req_queue.pop_front();
+         }
+-        host::optional_work("textures", [&] {
+-        bool cached;
+-        { std::lock_guard<std::mutex> lk(g_cache_mutex); cached = g_cache.count(name) != 0; }
+-        if (!cached && has(name)) {
+-          // Wanted right now: it goes in, and the least recently used others make room.
+-          if (auto r = decode_entry(name, ~0ull)) {
+-            std::lock_guard<std::mutex> lk(g_cache_mutex);
+-            cache_put_locked(name, std::shared_ptr<const Replacement>(std::move(r)));
+-          }
+-        }
+-        });
+-        std::lock_guard<std::mutex> lk(g_req_mutex);
+-        g_req_pending.erase(name);
+-        g_req_waiting.fetch_sub(1, std::memory_order_relaxed);
++        process_request(name);
+       }
+-    });
++    };
++#ifdef MU_SWITCH2
++    // Three decoders on Switch threads with 1 MB stacks (not std::thread: libnx has no
++    // pthread_detach, and its default stack is small), below the game's priority. They run for the
++    // life of the program. Several at once, so a screen's pictures arrive together, not one by one.
++    static Thread decoders[4];
++    unsigned wanted = 2;   // config.ini texdecoders=1..4 (MU_TEXTURE_DECODERS)
++    if (const char* v = std::getenv("MU_TEXTURE_DECODERS")) wanted = (unsigned)std::clamp(std::atoi(v), 1, 4);
++    static auto entry = [](void* arg) { (*static_cast<decltype(worker)*>(arg))(); };
++    static auto loop = worker;
++    s32 priority = 0x2c;
++    svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
++    for (unsigned k = 0; k < wanted; ++k)
++      if (Thread& t = decoders[k]; true) {
++        const Result rc = threadCreate(&t, entry, &loop, nullptr, 1u << 20, std::min(priority + 2, 0x3f), -2);
++        const Result started = R_SUCCEEDED(rc) ? threadStart(&t) : rc;
++        host::log("textures: decoder thread %u of %u: create 0x%x, start 0x%x", k + 1, wanted, rc, started);
++      }
++#else
++    g_req_thread = std::thread(worker);
+     g_req_thread.detach();
++#endif
+   }
+-  g_req_cv.notify_one();
+ }
+ 
+ void dump_level(const std::string& base, uint32_t level, const uint8_t* level_rgba,
+diff --git a/port/runtime/gx/texture_pack.h b/port/runtime/gx/texture_pack.h
+index 9a8e62d..d280b39 100644
+--- a/port/runtime/gx/texture_pack.h
++++ b/port/runtime/gx/texture_pack.h
+@@ -50,6 +50,17 @@ bool configure(bool enabled, bool dump);
+ // load() returns at once. request(): decode it on the loader thread; ready() turns true when done.
+ bool has(const std::string& base);
+ bool ready(const std::string& base);
++// Drops a decoded picture from the waiting room once the renderer has uploaded it (Switch).
++void release(const std::string& base);
++// Starts the background decoders now (Switch: from the main thread at boot, before the renderer
++// is busy; request() starts them otherwise).
++void start_decoders();
++// texdecoders=0: no threads; the renderer decodes on first draw.
++bool synchronous();
++// Switch: whether the main thread decodes (the default), and its turn: waits up to timeout_ns for a
++// queued picture and decodes it. False when nothing came.
++bool main_thread_decodes();
++bool serve(uint64_t timeout_ns);
+ void request(const std::string& base);
+ bool enabled();
+ bool dumping();
 diff --git a/port/runtime/host/host.h b/port/runtime/host/host.h
 index 0b2092d..daf34ff 100644
 --- a/port/runtime/host/host.h
@@ -3303,15 +3791,16 @@ index 0000000..e5d852b
 +} // namespace linux_renderer
 diff --git a/port/switch2/host_switch.cpp b/port/switch2/host_switch.cpp
 new file mode 100644
-index 0000000..12dfbcf
+index 0000000..e2e6010
 --- /dev/null
 +++ b/port/switch2/host_switch.cpp
-@@ -0,0 +1,1647 @@
+@@ -0,0 +1,1691 @@
 +// Switch 2 (kaiHEN NRO) machine services for the native source game.
 +// Boot-test stage: memory, disc, timing, audio DSP, memory card and pads; no renderer yet.
 +// Derived from port/linux/host_services.cpp.
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +#include <switch.h>
++#include <malloc.h>
 +#include <zlib.h>
 +#include "launcher_art.h"
 +#include "options_art.h"   // the options screen (launcher/options_art.py)
@@ -3382,6 +3871,7 @@ index 0000000..12dfbcf
 +  }
 +}
 +namespace { void set_config_value(const char* key, const char* value); }   // config.ini, defined below main
++namespace gx { namespace texpack { void start_decoders(); bool main_thread_decodes(); bool serve(uint64_t timeout_ns); } }
 +namespace switch_host {
 +void log(const char* format, ...);
 +void crumb(unsigned kind, unsigned long value);
@@ -3455,15 +3945,17 @@ index 0000000..12dfbcf
 +int render_core = -2;   // chosen in run(): a core other than the game's and the main thread's
 +#endif   // the NRO's load address (start of its code mapping), found at start-up
 +
++std::mutex log_mutex;   // lines come from several threads (the game, the texture pack decoders)
 +void write_log(const char* format, va_list args) {
 +  if (!log_file) return;
++  std::lock_guard<std::mutex> lock(log_mutex);
 +  std::vfprintf(log_file, format, args);
 +  std::fputc('\n', log_file);
 +  // Not flushed here: a write to the SD card from the game thread can take milliseconds, a frame
 +  // hitch for a log line. The watchdog (main thread) flushes once a second, so a crash loses at
 +  // most the last second.
 +}
-+void flush_log() { if (log_file) std::fflush(log_file); }
++void flush_log() { if (!log_file) return; std::lock_guard<std::mutex> lock(log_mutex); std::fflush(log_file); }
 +
 +bool fail(std::string* error, const std::string& message) {
 +  if (error) *error = message;
@@ -3587,10 +4079,11 @@ index 0000000..12dfbcf
 +    // follow straight on from the last.
 +    if (scene == (2u << 16 | 2u)) sweep_match_started();
 +  }
-+  if (count.retraces % 600 == 0)
++  if (count.retraces % 600 == 0) {
 +    log("alive: retrace=%u disc_reads=%llu disc_MB=%llu fifo_MB=%llu audio_blocks=%llu", count.retraces,
 +        (unsigned long long)count.disc_reads, (unsigned long long)(count.disc_bytes >> 20),
 +        (unsigned long long)(count.fifo_bytes >> 20), (unsigned long long)count.audio_blocks);
++  }
 +#ifdef MU_SWITCH_GRAPHICS
 +  if (count.retraces % 600 == 0 && renderer) {
 +    uint64_t commands = 0, draws = 0, vertices = 0; uint32_t copies = 0, frames = 0, pipelines = 0, textures = 0;
@@ -3941,6 +4434,7 @@ index 0000000..12dfbcf
 +// sdmc:/melee/config.ini, one "key=value" per line:
 +//   widescreen=1   True 16:9 (more of the stage to each side), 0 for the original 4:3 picture
 +//   scale=2        internal resolution: 1 = 640x528 (original), 2 = 1280x1056, 3 = 1920x1584
++#define HD_HELP "# hdtextures: custom textures. 1 = use Dolphin-format texture packs, each in its own folder in sdmc:/melee/textures/, 0 = off\n"
 +#define RUMBLE_HELP "# rumble: controller rumble. 0 = off, 50 = normal, 100 = strongest (Melee's own per-player Rumble option also applies)\n"
 +// Opens config.ini to add a setting at the end, first ending the last line if the file doesn't end
 +// with one (a value typed in by hand with no line break after it would otherwise run into ours).
@@ -3957,7 +4451,7 @@ index 0000000..12dfbcf
 +#define LOGGING_HELP "# logging: 1 = write boot.log, gl.log and launches.txt to this folder (for reporting a problem), 0 = no logs\n"
 +#define CPU_20XX_HELP "# cpu20xx: CPUs play with the 20XX AI. 1 = only in 20XX Tournament Edition, 2 = always, 0 = never\n"
 +void load_settings() {
-+  bool seen_tap_jump = false, seen_cpu_20xx = false, seen_logging = false, seen_rumble = false;
++  bool seen_tap_jump = false, seen_cpu_20xx = false, seen_logging = false, seen_rumble = false, seen_hd = false;
 +  if (FILE* f = std::fopen("sdmc:/melee/config.ini", "r")) {
 +    char line[256];
 +    while (std::fgets(line, sizeof line, f)) {
@@ -3967,6 +4461,7 @@ index 0000000..12dfbcf
 +      if (!std::strcmp(key, "widescreen")) {}   // always 16:9 with the menu layers stretched (the old setting is ignored)
 +      else if (!std::strcmp(key, "scale")) settings.scale = std::clamp(std::round(number * 4) / 4, 1.0, 4.0);   // steps of 0.25
 +      else if (!std::strcmp(key, "logging")) seen_logging = true;
++      else if (!std::strcmp(key, "hdtextures")) seen_hd = true;
 +      else if (!std::strcmp(key, "rumble")) { settings.rumble = std::clamp(value, 0, 100); seen_rumble = true; }
 +      else if (!std::strcmp(key, "tapjump")) { settings.tap_jump = value != 0; seen_tap_jump = true; }
 +      else if (!std::strcmp(key, "cpu20xx")) { settings.cpu_20xx = std::clamp(value, 0, 2); seen_cpu_20xx = true; }
@@ -3975,6 +4470,10 @@ index 0000000..12dfbcf
 +    // Settings added after the file was made are appended with their defaults, so they can be found.
 +    if (!seen_rumble) if (FILE* a = config_append()) {
 +      std::fputs(RUMBLE_HELP "rumble=0\n", a);
++      std::fclose(a);
++    }
++    if (!seen_hd) if (FILE* a = config_append()) {
++      std::fputs(HD_HELP "hdtextures=0\n", a);
 +      std::fclose(a);
 +    }
 +    if (!seen_logging) if (FILE* a = config_append()) {
@@ -4001,6 +4500,7 @@ index 0000000..12dfbcf
 +               "# (with a default set, press L just after launching to get the picker back)\n"
 +               "boot=ask\n"
 +               RUMBLE_HELP "rumble=0\n"
++               HD_HELP "hdtextures=0\n"
 +               LOGGING_HELP "logging=0\n"
 +               "# crashtrail: 1 = also record what ran just before a crash (slows the game; turns logging on)\n"
 +               "crashtrail=0\n", f);
@@ -4395,7 +4895,13 @@ index 0000000..12dfbcf
 +  cfg = config; count = {}; game = {}; audio = {}; stop_requested = false; stop_code = 0;
 +  resimulating = false; next_retrace = ticks_per_frame; sound = 1; progressive = 0;
 +  log_file = g_logging ? std::fopen(cfg.log_path.c_str(), "w") : nullptr;
-+  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 72, threaded graphics + sound, widescreen, 20XX)");
++#ifdef MU_SWITCH_GRAPHICS
++  // The decoder threads start here, on the main thread before the renderer exists (started by the
++  // render thread at the first HD picture, builds 74-77, boot closed with an error about every
++  // other launch).
++  if (std::getenv("MU_TEXTURE_PACKS")) gx::texpack::start_decoders();
++#endif
++  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 84, threaded graphics + sound, widescreen, 20XX)");
 +  // The call trace slows the game to a crawl (a flushed SD write per call): only on request.
 +  if (FILE* on = std::fopen("sdmc:/melee/trace.on", "r")) {
 +    std::fclose(on);
@@ -4523,7 +5029,27 @@ index 0000000..12dfbcf
 +  // Watchdog: once a second, note whether the game is still calling the host. A crash ends the
 +  // process (the log stops); a hang shows as a call count that stops moving.
 +  uint64_t seen = 0;
-+  for (int second = 1; R_FAILED(waitSingle(waiterForThread(&thread), 1000000000ull)); ++second) {
++#ifdef MU_SWITCH_GRAPHICS
++  const bool main_decodes = std::getenv("MU_TEXTURE_PACKS") && gx::texpack::main_thread_decodes();
++  if (main_decodes) log("textures: HD pictures are decoded on the main thread");
++#else
++  const bool main_decodes = false;
++#endif
++  // One watchdog second. With HD textures the main thread decodes queued pictures in the meantime
++  // (in turns of up to 20 ms of waiting), checking between them whether the game has ended.
++  auto wait_a_second = [&]() -> bool {   // true: the game thread has ended
++    if (!main_decodes) return R_SUCCEEDED(waitSingle(waiterForThread(&thread), 1000000000ull));
++    const u64 deadline = armGetSystemTick() + armNsToTicks(1000000000ull);
++    for (;;) {
++      if (R_SUCCEEDED(waitSingle(waiterForThread(&thread), 0))) return true;
++      const u64 now = armGetSystemTick();
++      if (now >= deadline) return false;
++#ifdef MU_SWITCH_GRAPHICS
++      gx::texpack::serve(std::min<u64>(armTicksToNs(deadline - now), 20000000ull));
++#endif
++    }
++  };
++  for (int second = 1; !wait_a_second(); ++second) {
 +    const uint64_t calls = trace_calls;
 +    // A crash ends the log at once. For 30 s after each scene change (a match starting, mostly) a line
 +    // every 2 s says how far the game got and what it last asked the host for.
@@ -4655,7 +5181,7 @@ index 0000000..12dfbcf
 +  if (FILE* f = std::fopen("sdmc:/melee/launches.txt", "a")) {
 +    const time_t now = std::time(nullptr);
 +    char when[32]; std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-+    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 72)\n", when, what);
++    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 84)\n", when, what);
 +    std::fclose(f);
 +  }
 +}
@@ -4822,7 +5348,7 @@ index 0000000..12dfbcf
 +}
 +// The options screen (X on the picker): rumble, tap jump, scale and logging, saved to config.ini
 +// as they change. The game reads them when it starts, which is after the picker.
-+// Rows: 0 rumble, 1 tap jump, 2 scale, 3 logging. Values index opt_value: 0 On, 1 Off, 2.. scales.
++// Rows: 0 rumble, 1 tap jump, 2 scale, 3 logging, 4 HD textures. Values index opt_value: 0 On, 1 Off, 2.. scales.
 +void options_menu(PadState& pad, Screen& screen) {
 +  static const char* const kScales[] = {"1", "1.5", "2", "3", "4"};
 +  auto number = [](const char* key, double fallback) {
@@ -4830,7 +5356,7 @@ index 0000000..12dfbcf
 +    char* end = nullptr; const double d = v.empty() ? fallback : std::strtod(v.c_str(), &end);
 +    return end && end != v.c_str() ? d : fallback;
 +  };
-+  int value[4];
++  int value[5];
 +  value[0] = number("rumble", 0) > 0 ? 0 : 1;
 +  value[1] = number("tapjump", 1) != 0 ? 0 : 1;
 +  const double scale = number("scale", 2);
@@ -4838,13 +5364,14 @@ index 0000000..12dfbcf
 +  for (int i = 0; i < 5; ++i) if (std::fabs(std::atof(kScales[i]) - scale) < std::fabs(std::atof(kScales[s]) - scale)) s = i;
 +  value[2] = 2 + s;
 +  value[3] = number("logging", 0) != 0 ? 0 : 1;
++  value[4] = number("hdtextures", 0) != 0 ? 0 : 1;
 +  int selected = 0; bool redraw = true;
 +  while (appletMainLoop()) {
 +    padUpdate(&pad);
 +    const u64 down = padGetButtonsDown(&pad);
 +    if (down & (HidNpadButton_B | HidNpadButton_X | HidNpadButton_Plus)) break;
-+    if (down & HidNpadButton_AnyUp) { selected = (selected + 3) % 4; redraw = true; }
-+    if (down & HidNpadButton_AnyDown) { selected = (selected + 1) % 4; redraw = true; }
++    if (down & HidNpadButton_AnyUp) { selected = (selected + opt_rows - 1) % opt_rows; redraw = true; }
++    if (down & HidNpadButton_AnyDown) { selected = (selected + 1) % opt_rows; redraw = true; }
 +    const int step = (down & HidNpadButton_AnyRight) ? 1 : (down & HidNpadButton_AnyLeft) ? -1 : (down & HidNpadButton_A) ? 1 : 0;
 +    if (step) {
 +      if (selected == 2) {
@@ -4856,6 +5383,7 @@ index 0000000..12dfbcf
 +        if (selected == 0) set_config_value("rumble", on ? "50" : "0");
 +        if (selected == 1) set_config_value("tapjump", on ? "1" : "0");
 +        if (selected == 3) set_config_value("logging", on ? "1" : "0");
++        if (selected == 4) set_config_value("hdtextures", on ? "1" : "0");
 +      }
 +      redraw = true;
 +    }
@@ -4922,6 +5450,10 @@ index 0000000..12dfbcf
 +  ensure_boot_setting();
 +  if (!cfg.iso_path.empty()) {
 +    cfg.tournament_edition = switch_host::g_sweep_requested ? false : pick_game() == 1;
++    // Texture packs (sdmc:/melee/textures/<pack>): the renderer indexes them before the game starts.
++    if (config_value("hdtextures") == "1") setenv("MU_TEXTURE_PACKS", "1", 1);
++    if (!config_value("texdecoders").empty()) setenv("MU_TEXTURE_DECODERS", config_value("texdecoders").c_str(), 1);
++
 +    const bool was_logging = g_logging;
 +    g_logging = config_value("logging") == "1" || config_value("crashtrail") == "1" || switch_host::g_sweep_requested || gpu_profile;
 +    if (g_logging && !was_logging) for (const char* name : {"boot", "gl"}) {   // switched on in the options just now

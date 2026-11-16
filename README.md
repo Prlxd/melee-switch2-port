@@ -67,8 +67,8 @@ The first start shows a picker with two choices:
 
 ## Settings
 
-`sdmc:/melee/config.ini` is created on first start. Rumble, tap jump, resolution and logging can also be
-changed from the picker's options screen (**X**).
+`sdmc:/melee/config.ini` is created on first start. Rumble, tap jump, resolution, logging and custom
+textures can also be changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
 |---|---|
@@ -77,8 +77,31 @@ changed from the picker's options screen (**X**).
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
 | `boot` | `ask`, `normal` or `te`. |
+| `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/melee/textures/` (see below). Off by default. |
 | `logging` | `1` writes log files for reporting a problem. Off by default. |
 | `crashtrail` | `1` also records what ran just before a crash. Slows the game; leave at `0`. |
+
+## Custom textures
+
+The port loads Dolphin-format texture packs: folders of PNG files named like `tex1_64x64_51c08f85e5c371b7_0.png`,
+the kind made for Dolphin's `Load/Textures/GALE01` folder. No pack is included; download them from their
+authors.
+
+1. Put each pack in its own folder in `sdmc:/melee/textures/`, for example
+   `sdmc:/melee/textures/Melee HD/`. If the pack's download has a `GALE01` folder, copying that folder in
+   works too.
+2. Turn **Custom textures** on in the options screen (**X** in the picker), or set `hdtextures=1`.
+
+Tested with the Melee HD Texture Pack.
+Packs only change how things look, so they are safe to use with any game mode.
+
+- Menu pictures (title, character and stage select, HUD, results) are prepared while the game starts, so
+  they appear at once. Other pictures (stages, effects) load the first time they are drawn and can appear a
+  moment after the rest.
+- A pack can need a few extra shaders the first time its pictures appear, causing a brief slowdown on the
+  first visit to a screen or stage; after that they are built at startup with the rest.
+- Very large pictures (over 2048 pixels a side) are halved to save memory.
+- Costume and stage mods that replace `.dat` files are not supported; only texture packs.
 
 ## Known issues
 

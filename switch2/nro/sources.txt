@@ -18,3 +18,4 @@ sdl_egl.cpp port/switch2/sdl_egl.cpp
 shader_inproc.cpp port/switch2/shader_inproc.cpp
 shader_seed.h port/switch2/shader_seed.h
 subframe.cpp port/runtime/gx/subframe.cpp
+texture_pack.cpp port/runtime/gx/texture_pack.cpp

@@ -52,7 +52,7 @@ ICON		:=	icon.jpg
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	include $(MU)/port/switch2/compat $(MU)/port/switch2 $(MU)/port/linux $(MU)/port/runtime/abi $(MU)/port/runtime/hle $(MU)/port/runtime/host $(MU)/port/runtime/ppc $(MU)/port/runtime/gx $(MU)/native $(THIRD)/glslang $(THIRD)/b-glslang/include $(THIRD)/SPIRV-Cross
+INCLUDES	:=	include $(MU)/port/third_party $(MU)/port/switch2/compat $(MU)/port/switch2 $(MU)/port/linux $(MU)/port/runtime/abi $(MU)/port/runtime/hle $(MU)/port/runtime/host $(MU)/port/runtime/ppc $(MU)/port/runtime/gx $(MU)/native $(THIRD)/glslang $(THIRD)/b-glslang/include $(THIRD)/SPIRV-Cross
 #ROMFS	:=	romfs
 
 #---------------------------------------------------------------------------------
