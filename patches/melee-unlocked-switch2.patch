@@ -1,5 +1,5 @@
 diff --git a/port/linux/renderer_gl.cpp b/port/linux/renderer_gl.cpp
-index 004bbdc..4b90439 100644
+index 004bbdc..9745bcb 100644
 --- a/port/linux/renderer_gl.cpp
 +++ b/port/linux/renderer_gl.cpp
 @@ -16,6 +16,9 @@
@@ -59,15 +59,41 @@ index 004bbdc..4b90439 100644
  void run_tool(std::vector<std::string> args, const std::filesystem::path& log) {
    std::vector<char*> argv;
    for (auto& a : args) argv.push_back(a.data());
-@@ -140,6 +164,7 @@ void translate_shader(GLenum stage, const std::string& source, const std::filesy
+@@ -140,7 +164,10 @@ void translate_shader(GLenum stage, const std::string& source, const std::filesy
    std::error_code ec;
    std::filesystem::remove(input, ec); std::filesystem::remove(spv, ec); std::filesystem::remove(log, ec);
  }
 +#endif  // MU_SWITCH2
  #endif
++// Time spent compiling and linking GLSL on the render thread (the slow-frame diagnostic).
++static double g_shader_build_ms = 0;
  GLuint compile_gl(GLenum stage, const std::string& source) {
  #ifdef __APPLE__
-@@ -195,6 +220,10 @@ struct Texture {
+   std::string compatible = source;
+@@ -152,9 +179,11 @@ GLuint compile_gl(GLenum stage, const std::string& source) {
+   const char* data = source.c_str();
+ #endif
+   glShaderSource(shader, 1, &data, nullptr);
++  const auto build_start = std::chrono::steady_clock::now();
+   glCompileShader(shader);
+   GLint ok = 0;
+   glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
++  g_shader_build_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - build_start).count();
+   if (!ok) {
+     GLint count = 0; glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &count);
+     std::string log(std::max(count, 1), '\0');
+@@ -166,8 +195,10 @@ GLuint compile_gl(GLenum stage, const std::string& source) {
+ GLuint link_gl(GLuint vs, GLuint ps, bool retrievable = false) {
+   GLuint program = glCreateProgram();
+   if (retrievable) glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
++  const auto build_start = std::chrono::steady_clock::now();
+   glAttachShader(program, vs); glAttachShader(program, ps); glLinkProgram(program);
+   GLint ok = 0; glGetProgramiv(program, GL_LINK_STATUS, &ok);
++  g_shader_build_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - build_start).count();
+   if (!ok) {
+     GLint count = 0; glGetProgramiv(program, GL_INFO_LOG_LENGTH, &count);
+     std::string log(std::max(count, 1), '\0');
+@@ -195,6 +226,10 @@ struct Texture {
    GLuint id = 0, fbo = 0;
    uint32_t width = 0, height = 0, levels = 1;
    uint64_t used = 0, bytes = 0;
@@ -78,7 +104,7 @@ index 004bbdc..4b90439 100644
  };
  
  #ifdef __APPLE__
-@@ -210,11 +239,15 @@ struct GlProbeScope {
+@@ -210,11 +245,16 @@ struct GlProbeScope {
    ~GlProbeScope() { if (total) *total += std::chrono::duration<double, std::milli>(Clock::now() - start).count(); }
  };
  struct GlProbe {
@@ -89,14 +115,15 @@ index 004bbdc..4b90439 100644
 -  double total=0, attrib=0, texture=0, buffers=0, draw=0, copy=0, swap=0, prewarm=0;
 +#endif
 +  double total=0, attrib=0, texture=0, buffers=0, draw=0, copy=0, swap=0, prewarm=0, wait=0;
++  double draw_fn=0, present_fn=0, before=0, trim_ms=0;   // the slow-frame lines and menu warming
    uint64_t draws=0, uploads=0, copy_allocs=0, vs_bytes=0, index_bytes=0;
    double* slot(double& value) { return on ? &value : nullptr; }
 -  void reset() { total=attrib=texture=buffers=draw=copy=swap=prewarm=0; draws=uploads=copy_allocs=vs_bytes=index_bytes=0; }
-+  void reset() { total=attrib=texture=buffers=draw=copy=swap=prewarm=wait=0; draws=uploads=copy_allocs=vs_bytes=index_bytes=0; }
++  void reset() { total=attrib=texture=buffers=draw=copy=swap=prewarm=wait=0; draw_fn=present_fn=before=trim_ms=0; draws=uploads=copy_allocs=vs_bytes=index_bytes=0; }
  };
  // Each entry describes a call actually emitted since the last external GL boundary.
  // Unknown differs from every value, including zero/disabled and an empty texture.
-@@ -246,15 +279,21 @@ struct ProgramAttributes {
+@@ -246,15 +286,21 @@ struct ProgramAttributes {
  };
  class Renderer final : public gx::Backend {
   public:
@@ -121,7 +148,7 @@ index 004bbdc..4b90439 100644
      std::filesystem::create_directories(cache_);
      context_ = SDL_GL_CreateContext(window_);
      if (!context_) throw std::runtime_error(std::string("SDL OpenGL context: ") + SDL_GetError());
-@@ -269,6 +308,9 @@ class Renderer final : public gx::Backend {
+@@ -269,6 +315,9 @@ class Renderer final : public gx::Backend {
      glGenBuffers(1, &vertices_); glGenBuffers(1, &indices_); glGenBuffers(2, uniform_);
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[0]); glBufferData(GL_UNIFORM_BUFFER, sizeof(gx::VSConstants), nullptr, GL_STREAM_DRAW);
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof(gx::PSConstants), nullptr, GL_STREAM_DRAW);
@@ -131,7 +158,7 @@ index 004bbdc..4b90439 100644
      glGenFramebuffers(1, &efb_); glBindFramebuffer(GL_FRAMEBUFFER, efb_);
      glGenTextures(1, &color_); glBindTexture(GL_TEXTURE_2D, color_);
      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-@@ -319,7 +361,13 @@ void main() {
+@@ -319,7 +368,13 @@ void main() {
                   sync_shaders_ ? "synchronous (diagnostic)" : "asynchronous (one worker)", compile_budget_ms_);
  #endif
    }
@@ -145,7 +172,7 @@ index 004bbdc..4b90439 100644
  #ifdef YOUGAME_AGENT_TEST_HOOK
      yougame::agent_present::recorder().stop(); // Drain evidence before the host's exit path.
  #endif
-@@ -335,7 +383,9 @@ void main() {
+@@ -335,7 +390,9 @@ void main() {
      stop_translators();
  #endif
      if (!context_) return;
@@ -155,7 +182,7 @@ index 004bbdc..4b90439 100644
      for (auto& p : attribute_locations_) glDeleteVertexArrays(1, &p.second.vao);
      for (auto& p : programs_) glDeleteProgram(p.second);
      for (auto& p : shaders_) glDeleteShader(p.second);
-@@ -345,7 +395,10 @@ void main() {
+@@ -345,7 +402,10 @@ void main() {
      glDeleteProgram(copy_program_); glDeleteTextures(1, &color_); glDeleteTextures(1, &depth_);
      glDeleteTextures(1, &last_color_); glDeleteFramebuffers(1, &last_frame_);
      glDeleteFramebuffers(1, &efb_); glDeleteBuffers(1, &vertices_); glDeleteBuffers(1, &indices_);
@@ -167,7 +194,7 @@ index 004bbdc..4b90439 100644
    }
    void presentation_stats(uint32_t* frames, uint32_t* pipes, uint32_t* textures) const override {
      if (frames) *frames = presented_;
-@@ -362,6 +415,32 @@ void main() {
+@@ -362,6 +422,38 @@ void main() {
      if (hooks_.drawable_size && !hooks_.drawable_size(&drawable_w, &drawable_h)) return;
  #endif
      source_retrace_ = frame.source_retrace; // Includes shader work before drawing and after the swap.
@@ -180,6 +207,8 @@ index 004bbdc..4b90439 100644
 +    if (screen_backlog()) return;
 +    const auto probe_start = std::chrono::steady_clock::now();
 +    probe_.reset();
++    slow_compile0_ = g_shader_build_ms; slow_programs0_ = programs_.size(); slow_textures0_ = textures_.size();
++    slow_vaos0_ = attribute_locations_.size(); slow_shaders0_ = shaders_.size();
 +    gpu_timer_begin();
 +    profile_collect();
 +    profile_begin(frame);
@@ -191,7 +220,11 @@ index 004bbdc..4b90439 100644
 +    // the background and appear a moment late.
 +    {
 +      const bool in_match = gx::frame_in_match(frame);
-+      if (in_match && !was_in_match_) { match_gate_ = 150; shader_log("opengl: match starting: new shaders are built before play"); }
++      if (in_match && !was_in_match_) {
++        match_gate_ = 150;
++        shader_log("opengl: match starting: new shaders are built before play (menus: %zu programs drawn with ahead, %zu of %zu recipes visited)",
++                   warm_done_, warm_next_, warm_list_.size());
++      }
 +      was_in_match_ = in_match;
 +      build_now_ = !in_match || match_gate_ > 0;
 +      if (match_gate_ > 0) --match_gate_;
@@ -200,7 +233,7 @@ index 004bbdc..4b90439 100644
  #ifdef __APPLE__
      Clock::time_point probe_start;
      if (probe_.on) { probe_.reset(); probe_start = Clock::now(); }
-@@ -369,7 +448,15 @@ void main() {
+@@ -369,7 +461,15 @@ void main() {
      drain_programs();
  #endif
      if (hooks_.frame_begin) { hooks_.frame_begin(frame); invalidate_state(); }
@@ -216,7 +249,7 @@ index 004bbdc..4b90439 100644
      const int lightweight = hooks_.options ? hooks_.options->lightweight : 0;
      gx::set_lightweight_level(lightweight);
      if (hooks_.options) gx::publish_look(*hooks_.options);
-@@ -415,7 +502,8 @@ void main() {
+@@ -415,7 +515,8 @@ void main() {
      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices_);
      glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniform_[0]); glBindBufferBase(GL_UNIFORM_BUFFER, 1, uniform_[1]);
      gx::set_main_projection(gx::frame_scene_draw(frame));
@@ -226,18 +259,35 @@ index 004bbdc..4b90439 100644
  #ifdef GX_PC_SETTINGS
      // Menu video backgrounds: the character select's video goes in after Melee's untextured
      // animated backdrop, the stage select's right after the learned backdrop draw (as on Windows).
-@@ -443,6 +531,9 @@ void main() {
+@@ -426,6 +527,9 @@ void main() {
+     const bool css_fullscreen = fullscreen && fullscreen_slot == 0 && screen;
+     unsigned leading_untextured = 0;
+     bool background_drawn = false;
++#endif
++#ifdef MU_SWITCH2
++    probe_.before = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - probe_start).count();
+ #endif
+     for (const auto& command : frame.commands) {
+       if (command.kind == gx::FrameCommand::Draw) {
+@@ -442,7 +546,11 @@ void main() {
+         }
          draw_video_slot_ = -1;
  #endif
-         draw(frame, dc, overrides ? overrides + command.index : nullptr, vertex_offsets_[command.index]);
+-        draw(frame, dc, overrides ? overrides + command.index : nullptr, vertex_offsets_[command.index]);
++        { GlProbeScope cost(probe_.slot(probe_.draw_fn));
++          draw(frame, dc, overrides ? overrides + command.index : nullptr, vertex_offsets_[command.index]); }
 +#ifdef MU_SWITCH2
 +        profile_stamp(0, &dc, nullptr);
 +#endif
  #ifdef GX_PC_SETTINGS
          if (fullscreen && screen && fullscreen_slot == 1 && draw_video_slot_ == 1 && !background_drawn) {
            draw_video_layer(fullscreen, fullscreen_slot, *screen);
-@@ -454,9 +545,17 @@ void main() {
-         if (c.to_xfb) { if (!skip_) { capture_sequence_ = frame.sequence; present(c, frame); } }
+@@ -451,12 +559,21 @@ void main() {
+ #endif
+       } else {
+         const auto& c = frame.copies.at(command.index);
+-        if (c.to_xfb) { if (!skip_) { capture_sequence_ = frame.sequence; present(c, frame); } }
++        if (c.to_xfb) { if (!skip_) { capture_sequence_ = frame.sequence; GlProbeScope cost(probe_.slot(probe_.present_fn)); present(c, frame); } }
          else copy(c);
          if (c.clear) clear(c);
 +#ifdef MU_SWITCH2
@@ -245,8 +295,10 @@ index 004bbdc..4b90439 100644
 +#endif
        }
      }
-     trim();
+-    trim();
++    { GlProbeScope cost(probe_.slot(probe_.trim_ms)); trim(); }
 +#ifdef MU_SWITCH2
++    warm_some(frame);
 +    gpu_timer_end();
 +    frame_fence_done();
 +    switch_cost_report(frame, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - probe_start).count());
@@ -254,7 +306,7 @@ index 004bbdc..4b90439 100644
  #ifdef __APPLE__
      report_skips(false);
      if (probe_.on) {
-@@ -530,7 +629,7 @@ void main() {
+@@ -530,7 +647,7 @@ void main() {
      glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_);
      auto pixel = [this](int x, int y) {
        std::array<uint8_t, 4> color{};
@@ -263,7 +315,7 @@ index 004bbdc..4b90439 100644
        return color;
      };
      const auto background = pixel(0, 0), red = pixel(150, 400), blue = pixel(320, 200), texture = pixel(500, 275);
-@@ -582,6 +681,10 @@ void main() {
+@@ -582,6 +699,10 @@ void main() {
      const auto partial = path.string() + "." + std::to_string(getpid());
      { std::ofstream f(partial, std::ios::binary); f.write(data.data(), static_cast<std::streamsize>(data.size())); if (!f) return; }
      std::error_code ec; std::filesystem::rename(partial, path, ec);
@@ -274,7 +326,7 @@ index 004bbdc..4b90439 100644
      if (ec) std::filesystem::remove(partial, ec);
    }
    // MELEE_TEST_SHOT=<dir>:<n>,<n>,...: save the picture presented to the window (after scaling and letterbox) at
-@@ -710,28 +813,161 @@ void main() {
+@@ -710,28 +831,162 @@ void main() {
      return spent();
    }
  #else
@@ -366,16 +418,17 @@ index 004bbdc..4b90439 100644
      prewarming_ = false;
 -    saved_recipes_ = recipes_.size();
 +#ifdef MU_SWITCH2
++    warm_list_ = list;   // drawn with, a few a frame, in the menus (warm_some)
 +    prewarm_screen_close();
-     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
--    shader_log("opengl: prewarmed %zu programs from %zu recipes before guest startup in %.1f ms%s",
--                 programs_.size(), count, ms, binaries_ ? "" : " (driver keeps no program binaries)");
++    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 +    save_recipes();   // this resolution's list now holds the borrowed and built-in recipes too
 +    shader_log("opengl: prewarmed %zu programs from %zu recipes (%zu from other resolutions, %zu built in) before guest startup in %.1f ms%s",
 +                 programs_.size(), seen.size(), borrowed, seeded, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +#else
 +    save_recipes();   // this resolution's list now holds the borrowed recipes too
-+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+-    shader_log("opengl: prewarmed %zu programs from %zu recipes before guest startup in %.1f ms%s",
+-                 programs_.size(), count, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +    shader_log("opengl: prewarmed %zu programs from %zu recipes (%zu from other resolutions) before guest startup in %.1f ms%s",
 +                 programs_.size(), seen.size(), borrowed, ms, binaries_ ? "" : " (driver keeps no program binaries)");
 +#endif
@@ -435,18 +488,18 @@ index 004bbdc..4b90439 100644
 +    glBlitFramebuffer(bw - cap, 720, bw, 720 + bh, sx(f - cap), y1, sx(f), y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 +    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 +    SDL_GL_SwapWindow(window_);
-+  }
+   }
 +  void prewarm_screen_close() {
 +    if (prewarm_fbo_) glDeleteFramebuffers(1, &prewarm_fbo_);
 +    if (prewarm_tex_) glDeleteTextures(1, &prewarm_tex_);
 +    prewarm_fbo_ = prewarm_tex_ = 0;
 +    glClearColor(0, 0, 0, 1);
-   }
++  }
 +#endif
  #endif
    void save_recipes() {
      if (recipes_.size() == saved_recipes_) return;
-@@ -799,6 +1035,9 @@ void main() {
+@@ -799,6 +1054,9 @@ void main() {
      }
    }
    GLuint program(const gx::DrawCall& dc) {
@@ -456,7 +509,7 @@ index 004bbdc..4b90439 100644
      const auto vs = gx::make_vs_uid(dc); const auto ps = gx::make_ps_uid(dc);
      ProgramKey key{vs.hash(), ps.hash()};
      if (auto i = programs_.find(key); i != programs_.end()) return i->second;
-@@ -927,7 +1166,11 @@ void main() {
+@@ -927,7 +1185,11 @@ void main() {
        {
          std::lock_guard<std::mutex> lock(translate_mutex_);
          failed_before = translate_failed_.count(key) != 0;
@@ -468,7 +521,7 @@ index 004bbdc..4b90439 100644
            if (translate_pending_.insert(key).second) {
              translate_jobs_.push_back({key, stage, std::move(source), prefix, output});
              translate_cv_.notify_one();
-@@ -1056,7 +1299,15 @@ void main() {
+@@ -1056,7 +1318,15 @@ void main() {
  #endif
      const uint64_t desc[] = {t.data->hash, t.width, t.height, t.format, t.tlut_format, t.mip_levels};
      const uint64_t key = gx::look_key(gx::hash_bytes(desc, sizeof desc), look_surface_);
@@ -485,7 +538,7 @@ index 004bbdc..4b90439 100644
      if (probe_.on) ++probe_.uploads;
      invalidate_state(); // Allocation binds on the currently active texture unit.
      if (auto small = gx::look_replacement(t, look_surface_)) {   // the look's treated copy, one level (gx_retro.h)
-@@ -1093,6 +1344,41 @@ void main() {
+@@ -1093,6 +1363,41 @@ void main() {
          }
        }
      }
@@ -527,16 +580,20 @@ index 004bbdc..4b90439 100644
  #endif
      glGenTextures(1, &entry.id); glBindTexture(GL_TEXTURE_2D, entry.id);
      const uint8_t* data = t.data->image.data(); size_t remaining = t.data->image.size();
-@@ -1162,7 +1448,7 @@ void main() {
+@@ -1162,7 +1467,11 @@ void main() {
      const int r = std::clamp(int(gx::bits(br, 12, 12)) - ox - 341, 0, gx::EFB_WIDTH), b = std::clamp(int(gx::bits(br, 0, 12)) - oy - 341, 0, gx::EFB_HEIGHT);
      if (r <= l || b <= t) return;
      capability(emitted_.scissor, GL_SCISSOR_TEST, true);
 -    const std::array<GLint, 4> rect{l * scale_, height_ - b * scale_, (r - l) * scale_, (b - t) * scale_};
 +    const std::array<GLint, 4> rect{GLint(std::lround(l * scale_)), GLint(std::lround(height_ - b * scale_)), GLint(std::lround((r - l) * scale_)), GLint(std::lround((b - t) * scale_))};
++#ifdef MU_SWITCH2
++    if (warming_) { const std::array<GLint, 4> none{0, 0, 1, 1}; if (emitted_.scissor_rect.changed(none)) glScissor(0, 0, 1, 1); }
++    else
++#endif
      if (emitted_.scissor_rect.changed(rect)) glScissor(rect[0], rect[1], rect[2], rect[3]);
      const auto blend = dc.bp.blendmode(), zmode = dc.bp.zmode(), cull = dc.bp.cullmode();
      const GLenum src[] = {GL_ZERO,GL_ONE,GL_DST_COLOR,GL_ONE_MINUS_DST_COLOR,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_DST_ALPHA,GL_ONE_MINUS_DST_ALPHA};
-@@ -1198,8 +1484,24 @@ void main() {
+@@ -1198,8 +1507,24 @@ void main() {
      glBindBuffer(GL_UNIFORM_BUFFER, uniform_[1]); glBufferData(GL_UNIFORM_BUFFER, sizeof pc, &pc, GL_STREAM_DRAW);
      }
  #else
@@ -561,8 +618,13 @@ index 004bbdc..4b90439 100644
  #endif
      const bool flat = gx::lightweight_flat(lightweight_filter_, dc);   // "Lightweight" 3+: one white texel instead
      look_surface_ = gx::look_surface(lightweight_filter_, dc);
-@@ -1223,14 +1525,21 @@ void main() {
+@@ -1221,16 +1546,26 @@ void main() {
+         topology = gx::append_segment_indices(index_scratch_, seg.primitive, seg.vertex_count, base);
+       }
      } else topology = gx::append_segment_indices(index_scratch_, dc.primitive, dc.vertex_count, vertex_override ? uint32_t(vertex_override) : dc.first_vertex);
++#ifdef MU_SWITCH2
++    if (warming_) { index_scratch_.assign(3, 0u); topology = gx::DrawTopology::Triangles; }   // one point thrice: no pixels
++#endif
      if (index_scratch_.empty()) return;
      if (probe_.on) probe_.index_bytes += index_scratch_.size() * sizeof(uint32_t);
 +    const void* index_offset = nullptr;
@@ -585,7 +647,7 @@ index 004bbdc..4b90439 100644
      if (wire) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
    }
    // MSAA (Anti-aliasing 2x/4x/8x MSAA): draws go to multisampled renderbuffers, blitted into the EFB
-@@ -1279,7 +1588,7 @@ void main() {
+@@ -1279,7 +1614,7 @@ void main() {
    void clear(const gx::EfbCopy& c) {
      invalidate_state();
      glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo()); glEnable(GL_SCISSOR_TEST);
@@ -594,7 +656,7 @@ index 004bbdc..4b90439 100644
      glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_TRUE);
      const uint32_t clear_colour = gx::look_clear_colour(lightweight_filter_.in_match, c.clear_color);   // the look's background
      glClearColor(((clear_colour >> 16) & 255) / 255.0f, ((clear_colour >> 8) & 255) / 255.0f, (clear_colour & 255) / 255.0f, (clear_colour >> 24) / 255.0f);
-@@ -1291,7 +1600,7 @@ void main() {
+@@ -1291,7 +1626,7 @@ void main() {
      GlProbeScope cost(probe_.slot(probe_.copy));
      if (!c.src_w || !c.src_h) return;
      resolve_msaa();
@@ -603,7 +665,7 @@ index 004bbdc..4b90439 100644
      auto& e = copies_[c.dest_addr & 0x3FFFFFFFu];
      if (!e.id || e.width != w || e.height != h) {
        if (probe_.on) ++probe_.copy_allocs;
-@@ -1346,10 +1655,15 @@ void main() {
+@@ -1346,10 +1681,15 @@ void main() {
      glBindFramebuffer(GL_READ_FRAMEBUFFER, efb_);
      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, last_frame_);
      glBlitFramebuffer(0, 0, width_, height_, 0, 0, width_, height_, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -619,7 +681,7 @@ index 004bbdc..4b90439 100644
      glDisable(GL_SCISSOR_TEST); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
      const float fill = test_fill > 0 ? 1.0f : 0.0f; glClearColor(fill, fill, fill, 1); glClear(GL_COLOR_BUFFER_BIT);
-@@ -1675,9 +1989,9 @@ void main() {
+@@ -1675,9 +2015,9 @@ void main() {
      glBindVertexArray(vao_);
      glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo());
      glEnable(GL_SCISSOR_TEST);
@@ -632,7 +694,7 @@ index 004bbdc..4b90439 100644
      const float rect[4] = {1.0f, -1.0f, 0.0f, 1.0f};
      copy_quad(id, rect);
      glBindVertexArray(vao_);
-@@ -1712,6 +2026,11 @@ void main() {
+@@ -1712,6 +2052,11 @@ void main() {
      if (sequence_ % 120) return;
      invalidate_state(); // Deleting a bound texture also changes the binding.
      for (auto i = textures_.begin(); i != textures_.end();) {
@@ -644,7 +706,7 @@ index 004bbdc..4b90439 100644
        if (i->second.used + 180 < sequence_) { destroy(i->second); i = textures_.erase(i); } else ++i;
      }
      for (auto i = copies_.begin(); i != copies_.end();) {
-@@ -1719,7 +2038,13 @@ void main() {
+@@ -1719,7 +2064,13 @@ void main() {
      }
      uint64_t bytes = 0;
      for (const auto& item : textures_) bytes += item.second.bytes;
@@ -658,7 +720,7 @@ index 004bbdc..4b90439 100644
      if (bytes > budget) {
        std::vector<std::pair<uint64_t, uint64_t>> oldest;
        for (const auto& item : textures_)
-@@ -1738,7 +2063,265 @@ void main() {
+@@ -1738,7 +2089,322 @@ void main() {
    EmittedState emitted_;
    std::unordered_map<GLuint, ProgramAttributes> attribute_locations_;
    GLint copy_source_ = -1, copy_kind_ = -1, copy_rect_ = -1;
@@ -765,6 +827,48 @@ index 004bbdc..4b90439 100644
 +    gpu_query_live_[gpu_query_next_] = true;
 +    gpu_query_next_ = (gpu_query_next_ + 1) % 4;
 +  }
++  // Warming (builds 101-102): a shader program's first draw in a session cost the driver ~5 ms
++  // (Zink+NVK finishing its pipeline), and a match's start draws ~20 new ones at once: the 100-150 ms
++  // hitch at "Ready, GO!". What the driver builds goes into its cache on the SD card, so each program
++  // is slow once per install, not once per launch; warming does that work in the menus instead. The boot's prewarm builds programs but draws nothing. In the
++  // menus, where a frame uses 3-5 ms of its 16.7, the prewarm's recipes are drawn with, a few a frame:
++  // one vertex three times (no area, no pixels) inside a 1x1 scissor, with the recipe's own state.
++  std::vector<ProgramRecipe> warm_list_;
++  size_t warm_next_ = 0, warm_done_ = 0;
++  int warm_per_frame_ = 1, warm_cooldown_ = 0;
++  bool warming_ = false;
++  void warm_some(const gx::Frame& frame) {
++    // The cost lands on the GPU (build 101 measured the CPU side, drew 8 a frame and made the GPU take
++    // 58 ms a frame for ten seconds). One program a frame (about 6 ms of GPU time at 4x), and only
++    // while the GPU's last measured frame left that much room under 16.7 ms; after a frame over
++    // 12 ms, a pause of a few frames. The player's own recipes come first in the list (the ones
++    // their matches use), then the other resolutions' and the built-in list.
++    const double work = probe_.present_fn + probe_.draw_fn;
++    if (gpu_ms_last_ > 12.0) warm_cooldown_ = 4;
++    if (warm_cooldown_ > 0) { --warm_cooldown_; return; }
++    if (warm_next_ >= warm_list_.size() || gx::frame_in_match(frame) || frame.vertices.empty()) return;
++    if (work > 10.0) return;   // a busy screen (the results) is left alone
++    warm_cooldown_ = 1;        // at most every other frame
++    warming_ = true;
++    int drawn = 0;
++    while (drawn < warm_per_frame_ && warm_next_ < warm_list_.size()) {
++      const ProgramRecipe& r = warm_list_[warm_next_++];
++      gx::DrawCall dc{}; dc.components = r.components; dc.bp = r.bp;
++      std::memcpy(dc.xf_regs, r.xf, sizeof r.xf);
++      dc.primitive = 0x90; dc.vertex_count = 3; dc.first_vertex = 0;
++      GLuint p = 0;
++      try { p = program(dc); } catch (const std::exception&) { continue; }
++      if (!p || attribute_locations_.count(p)) continue;   // already drawn with this session
++      try { draw(frame, dc, nullptr, 0); ++drawn; ++warm_done_; } catch (const std::exception&) {}
++    }
++    warming_ = false;
++    invalidate_state();
++    glBindFramebuffer(GL_FRAMEBUFFER, draw_fbo());
++    if (warm_next_ >= warm_list_.size())
++      shader_log("opengl: menus: %zu shader programs drawn with ahead of play (all %zu recipes visited)", warm_done_, warm_list_.size());
++  }
++  double slow_compile0_ = 0; size_t slow_programs0_ = 0, slow_textures0_ = 0, slow_vaos0_ = 0, slow_shaders0_ = 0;
++  int slow_logged_ = 0;
 +  CostSum cost_sum_, cost_worst_;
 +  uint32_t cost_frames_ = 0;
 +  uint16_t cost_worst_scene_ = 0;
@@ -774,6 +878,21 @@ index 004bbdc..4b90439 100644
 +    cost_sum_.total += c.total; cost_sum_.wait += c.wait; cost_sum_.attrib += c.attrib; cost_sum_.texture += c.texture;
 +    cost_sum_.buffers += c.buffers; cost_sum_.draw += c.draw; cost_sum_.copy += c.copy;
 +    cost_sum_.draws += c.draws; cost_sum_.uploads += c.uploads; cost_sum_.copies += c.copies;
++    // Diagnostic (the hitch at a match's "Ready, GO!"): a render frame over 40 ms says what it did.
++    if (c.total > 40.0 && slow_logged_ < 40) {
++      ++slow_logged_;
++      const double listed = c.wait + c.draw + c.attrib + c.texture + c.buffers + c.copy + probe_.swap + probe_.prewarm;
++      std::fprintf(stderr, "slow render frame: scene %02X:%02X, %.1f ms: gpu wait %.1f, draws %.1f, state %.1f, textures %.1f, "
++                   "buffers %.1f, copies %.1f, swap %.1f, prewarm %.1f, not in those %.1f; shader building %.1f ms; "
++                   "new: %zu programs, %zu shaders, %zu vertex layouts, %zu textures; %llu draws, %llu uploads; "
++                   "before the draws %.1f, all draws %.1f, presenting %.1f, trim %.1f\n",
++                   frame.scene_major, frame.scene_minor, c.total, c.wait, c.draw, c.attrib, c.texture, c.buffers, c.copy,
++                   probe_.swap, probe_.prewarm, c.total - listed, g_shader_build_ms - slow_compile0_,
++                   programs_.size() - slow_programs0_, shaders_.size() - slow_shaders0_,
++                   attribute_locations_.size() - slow_vaos0_, textures_.size() - slow_textures0_,
++                   (unsigned long long)c.draws, (unsigned long long)c.uploads,
++                   probe_.before, probe_.draw_fn, probe_.present_fn, probe_.trim_ms);
++    }
 +    if (c.total > cost_worst_.total) { cost_worst_ = c; cost_worst_scene_ = uint16_t(frame.scene_major << 8 | frame.scene_minor); }
 +    if (++cost_frames_ < 600) return;
 +    const double n = cost_frames_;
@@ -925,7 +1044,7 @@ index 004bbdc..4b90439 100644
    GLuint vao_ = 0, vertices_ = 0, indices_ = 0, uniform_[2]{}, efb_ = 0, color_ = 0, depth_ = 0, copy_program_ = 0;
    GLuint msaa_fbo_ = 0, msaa_rb_[2]{};
    int msaa_samples_ = 1;
-@@ -1825,7 +2408,7 @@ void main() {
+@@ -1825,7 +2491,7 @@ void main() {
  };
  } // namespace
  
@@ -973,97 +1092,242 @@ index 6d105af..2660cf8 100644
  #define MU_GAME_OPTION2_STADIUM_FROZEN      0x01000000u   /* Pokemon Stadium never transforms (offline, a plain option) */
  #define MU_GAME_OPTION2_ARCADE_PACK         0x02000000u   /* the recognised 2D-style mod build is the profile: its codes run natively (offline) */
 diff --git a/port/runtime/gx/gx_core.cpp b/port/runtime/gx/gx_core.cpp
-index ce0a964..a39450e 100644
+index ce0a964..a7fdd18 100644
 --- a/port/runtime/gx/gx_core.cpp
 +++ b/port/runtime/gx/gx_core.cpp
-@@ -11,6 +11,10 @@
+@@ -11,6 +11,11 @@
  #include "pc_settings_shared.h"
  #else
  namespace gx { void settings_guest_options_frame(uint8_t menu, uint16_t selection, uint32_t buttons); }
 +#ifdef MU_SWITCH2
-+extern "C" uint32_t svcSetThreadCoreMask(uint32_t handle, int32_t core, uint32_t affinity);
++extern "C" void* mu_thread_start(void (*entry)(void*), void* arg, int core, size_t stack);   // host_switch.cpp
++extern "C" void mu_thread_join(void* handle);
 +extern "C" void svcSleepThread(int64_t ns);
 +#endif
  #endif
  #include "host.h"
  #include "sim_work.h"
-@@ -461,9 +465,18 @@ void decode_run(const DecodeState& s, const uint8_t* src, uint32_t count, Vertex
+@@ -461,6 +466,152 @@ void decode_run(const DecodeState& s, const uint8_t* src, uint32_t count, Vertex
  // rewrite vertex data. Four-vertex quads still decode in place: record_draw reads them
  // (frustum_backdrop). MELEE_TEST_DECODE_VERIFY=1 (tests) also decodes each job in place and
  // compares the worker's result byte for byte at the join.
 +#ifdef MU_SWITCH2
 +// Switch 2: the vertex worker's processor core (config.ini vertexthread=0 turns it off: -1), and
 +// whether it ever failed to get onto that core (then the game thread decodes in place for good).
-+std::atomic<int> g_vertex_worker_core{-1};   // off unless config.ini vertexthread=1 (build 90: froze 2 boots of 3)
++std::atomic<int> g_vertex_worker_core{2};   // config.ini vertexthread=0 turns it off
 +std::atomic<bool> g_vertex_worker_failed{false};
 +#endif
- class VertexDecodeWorker {
-   struct Job { DecodeState state; size_t bytes_at; uint32_t count; Vertex* out; size_t verify_at; uint64_t key; };
-   std::thread thread_;
 +#ifdef MU_SWITCH2
-+  std::atomic<int> pinned_{0};   // 0 not yet running, 1 on its core, 2 could not be placed
-+#endif
-   std::mutex mutex_;
-   std::condition_variable wake_, done_;
-   std::vector<Job> jobs_;            // appended by the simulation thread; never reallocated while queued
-@@ -476,6 +489,16 @@ class VertexDecodeWorker {
-   uint64_t verified_jobs_ = 0, verify_mismatches_ = 0;
- 
-   void run() {
-+#ifdef MU_SWITCH2
-+    {
-+      // Onto its own core first: on the default core, shared with the host game's threads, the
-+      // worker could go unscheduled at boot while the game waited for it (the old black screen).
-+      // CUR_THREAD_HANDLE is 0xFFFF8000.
-+      const int core = g_vertex_worker_core.load();
-+      if (core >= 0 && svcSetThreadCoreMask(0xFFFF8000u, core, 1u << core) == 0) pinned_.store(1);
-+      else pinned_.store(2);
++// Switch 2 (kaiHEN): the same worker without a mutex or condition variable between the two threads.
++// With them, the worker started and then, in about half of all boots, never took the first two jobs
++// it was given: the game waited for ever (builds 89-90) or, decoding them itself, closed with an
++// error just after (93-96; build 96's trace: "published 2, worker took 0", then nothing). Here the
++// hand-over is three atomic counters. The worker, alone on its core, looks for work every 0.1 ms;
++// the game thread decodes whatever the worker has not claimed when it needs the vertices, and never
++// sleeps on the worker. A worker that never runs costs speed only.
++class VertexDecodeWorker {
++  struct Job { DecodeState state; size_t bytes_at; uint32_t count; Vertex* out; uint64_t key; };
++  void* thread_ = nullptr;
++  std::atomic<int> pinned_{0};   // 0 not yet running, 1 running, 2 could not be started
++  std::atomic<bool> stop_{false};
++  std::vector<Job> jobs_;            // appended by the game thread; never reallocated while work is out
++  std::vector<uint8_t> bytes_;       // the jobs' copied stream bytes, same rule
++  std::atomic<size_t> published_{0}, taken_{0}, finished_{0};
++  size_t unpublished_vertices_ = 0;
++  bool started_ = false;
++  std::atomic<uint64_t> failed_jobs_{0};
++  uint64_t failed_logged_ = 0, stolen_ = 0, total_ = 0, joins_ = 0;
++
++  void decode_range(size_t begin, size_t end) {
++    Job* const jobs = jobs_.data();
++    const uint8_t* const bytes = bytes_.data();
++    for (size_t i = begin; i < end; ++i) {
++      // A vertex array outside game memory makes the decode throw (host::ptr): caught here on either
++      // thread, the draw's vertices are left zeroed (nothing drawn) and the game thread logs it.
++      try { decode_run(jobs[i].state, bytes + jobs[i].bytes_at, jobs[i].count, jobs[i].out); }
++      catch (...) {
++        std::memset((void*)jobs[i].out, 0, (size_t)jobs[i].count * sizeof(Vertex));
++        failed_jobs_.fetch_add(1);
++      }
 +    }
-+#endif
-     std::unique_lock<std::mutex> lock(mutex_);
-     for (;;) {
-       wake_.wait(lock, [&] { return stop_ || taken_ < published_; });
-@@ -502,7 +525,20 @@ class VertexDecodeWorker {
-     { std::lock_guard<std::mutex> lock(mutex_); stop_ = true; publish_locked(); }
-     thread_.join();
-   }
-+#ifdef MU_SWITCH2
-+  // Switch 2 (kaiHEN): a std::thread lands on the process's default core at default priority, which
-+  // the host game's own threads share; at boot it could go unscheduled while the game waited in
-+  // join() for ever (the black screen at frame 5). The game thread decodes in place instead: it has
-+  // the time, and nothing waits on another thread.
-+  // Now on a core of its own (2: main thread 0, renderer 1, game 3), with a fallback: if it is not
-+  // running on that core within 200 ms of starting, the game thread decodes in place from then on.
++  }
++  // Claims [taken, published) for the caller: true and the range, or false if there is none.
++  bool claim(size_t* begin, size_t* end) {
++    size_t t = taken_.load();
++    for (;;) {
++      const size_t p = published_.load();
++      if (t >= p) return false;
++      if (taken_.compare_exchange_weak(t, p)) { *begin = t; *end = p; return true; }
++    }
++  }
++  void run() {
++    pinned_.store(1);
++    while (!stop_.load()) {
++      size_t begin, end;
++      if (!claim(&begin, &end)) { svcSleepThread(100000); continue; }
++      decode_range(begin, end);
++      finished_.fetch_add(end - begin);
++    }
++  }
++  void publish() {
++    if (published_.load() != jobs_.size()) published_.store(jobs_.size());
++    unpublished_vertices_ = 0;
++  }
++
++ public:
++  ~VertexDecodeWorker() {
++    if (!thread_) return;
++    stop_.store(true);
++    mu_thread_join(thread_);
++  }
 +  static bool wanted() {
 +    return host::game_image != nullptr && g_vertex_worker_core.load(std::memory_order_relaxed) >= 0 &&
 +           !g_vertex_worker_failed.load(std::memory_order_relaxed);
 +  }
-+#else
-   static bool wanted() { return host::game_image != nullptr; }
-+#endif
-   bool pending() const { return !jobs_.empty(); }
-   // Room for `count` more vertices in `frame` without moving its storage (else join first).
-   static bool fits(const Frame& frame, size_t count) { return frame.vertices.size() + count <= frame.vertices.capacity(); }
-@@ -533,6 +569,18 @@ class VertexDecodeWorker {
-       static const bool verify = [] { const char* v = host::test_env::getenv("MELEE_TEST_DECODE_VERIFY"); return v && *v == '1'; }();
-       verify_on_ = verify;
-       thread_ = std::thread([this] { run(); });
-+#ifdef MU_SWITCH2
++  bool pending() const { return !jobs_.empty(); }
++  static bool fits(const Frame& frame, size_t count) { return frame.vertices.size() + count <= frame.vertices.capacity(); }
++  void submit(const DecodeState& state, uint64_t key, const uint8_t* src, uint32_t count, Vertex* out) {
++    const size_t n = (size_t)count * state.d.size;
++    // The same format right after the previous job, still unpublished, contiguous: one longer job.
++    if (key && started_ && jobs_.size() > published_.load() && jobs_.back().key == key &&
++        jobs_.back().out + jobs_.back().count == out && bytes_.size() + n <= bytes_.capacity()) {
++      bytes_.insert(bytes_.end(), src, src + n);
++      jobs_.back().count += count;
++      unpublished_vertices_ += count;
++      if (unpublished_vertices_ >= 4096) publish();
++      return;
++    }
++    if (jobs_.size() == jobs_.capacity() || bytes_.size() + n > bytes_.capacity()) {
++      join();   // the worker reads both vectors: grow them only while it has nothing
++      jobs_.reserve(std::max<size_t>(4096, jobs_.capacity() * 2));
++      bytes_.reserve(std::max(bytes_.capacity() * 2, std::max<size_t>(1 << 20, n)));
++    }
++    if (!started_) {
++      started_ = true;
++      thread_ = mu_thread_start([](void* self) { static_cast<VertexDecodeWorker*>(self)->run(); }, this,
++                                g_vertex_worker_core.load(), 1u << 20);
++      if (!thread_) pinned_.store(2);
 +      for (int ms = 0; ms < 200 && pinned_.load() == 0; ++ms) svcSleepThread(1000000);
 +      const int pinned = pinned_.load();
 +      host::log("gx: vertex decoding %s", pinned == 1 ? "on its own thread (core 2)"
-+                                          : pinned == 2 ? "stays on the game thread (core 2 refused)"
++                                          : pinned == 2 ? "stays on the game thread (thread not created)"
 +                                                        : "stays on the game thread (worker did not start)");
 +      if (pinned != 1) {
-+        g_vertex_worker_failed.store(true);
-+        decode_run(state, src, count, out);   // this job, in place; later ones never come here
++        g_vertex_worker_failed.store(true);   // a worker that starts later still finds no work
++        decode_run(state, src, count, out);
 +        return;
 +      }
-+#endif
++    }
++    jobs_.push_back(Job{state, bytes_.size(), count, out, key});
++    bytes_.insert(bytes_.end(), src, src + n);
++    unpublished_vertices_ += count;
++    if (jobs_.size() - published_.load() >= 32 || unpublished_vertices_ >= 4096) publish();
++  }
++  // Every submitted job decoded; afterwards the frame's vertices are complete.
++  void join() {
++    if (jobs_.empty()) return;
++    {
++      host::SimCostScope cost(host::SIM_DECODE);
++      publish();
++      size_t begin, end;
++      while (claim(&begin, &end)) {   // whatever the worker has not claimed, decoded here
++        decode_range(begin, end);
++        stolen_ += end - begin;
++        finished_.fetch_add(end - begin);
++      }
++      // Only a range the worker has claimed is waited for, and a worker that claimed it is running.
++      const size_t want = published_.load();
++      while (finished_.load() < want) {}
++    }
++    if (const uint64_t failed = failed_jobs_.load(); failed != failed_logged_) {
++      if (failed_logged_ < 20) host::log("gx: vertex worker: a draw's vertex data was outside game memory (%llu so far); left out",
++                                        (unsigned long long)failed);
++      failed_logged_ = failed;
++    }
++    total_ += jobs_.size();
++    if (++joins_ % 3600 == 0)
++      host::log("gx: vertex worker: %llu of %llu jobs decoded on the game thread (the worker had not got to them)",
++                (unsigned long long)stolen_, (unsigned long long)total_);
++    // Reset in this order: a worker that read the old taken_ then sees published_ already at 0.
++    published_.store(0);
++    finished_.store(0);
++    taken_.store(0);
++    jobs_.clear(); bytes_.clear();
++    unpublished_vertices_ = 0;
++  }
++};
++#else
+ class VertexDecodeWorker {
+   struct Job { DecodeState state; size_t bytes_at; uint32_t count; Vertex* out; size_t verify_at; uint64_t key; };
+   std::thread thread_;
+@@ -474,6 +625,9 @@ class VertexDecodeWorker {
+   bool stop_ = false, started_ = false;
+   bool verify_on_ = false;
+   uint64_t verified_jobs_ = 0, verify_mismatches_ = 0;
++  uint64_t stolen_ = 0, total_ = 0, joins_ = 0;
++  std::atomic<uint64_t> failed_jobs_{0};
++  uint64_t failed_logged_ = 0;
+ 
+   void run() {
+     std::unique_lock<std::mutex> lock(mutex_);
+@@ -485,9 +639,19 @@ class VertexDecodeWorker {
+       Job* const jobs = jobs_.data();
+       const uint8_t* const bytes = bytes_.data();
+       lock.unlock();
+-      for (size_t i = begin; i < end; ++i) decode_run(jobs[i].state, bytes + jobs[i].bytes_at, jobs[i].count, jobs[i].out);
++      for (size_t i = begin; i < end; ++i) {
++        // A vertex array outside game memory makes the decode throw (host::ptr). On the game thread
++        // that is caught; on this thread an uncaught exception ends the program (build 94: "closed due
++        // to an unexpected error" at frame 4, the intro's first draws). The draw's vertices are left
++        // zeroed instead (nothing drawn) and the game thread logs it at the next join.
++        try { decode_run(jobs[i].state, bytes + jobs[i].bytes_at, jobs[i].count, jobs[i].out); }
++        catch (...) {
++          std::memset((void*)jobs[i].out, 0, (size_t)jobs[i].count * sizeof(Vertex));
++          failed_jobs_.fetch_add(1, std::memory_order_relaxed);
++        }
++      }
+       lock.lock();
+-      finished_ = end;
++      finished_ += end - begin;   // counted, not set: the game thread may finish a later range itself
+       done_.notify_all();
      }
-     Job job{state, bytes_.size(), count, out, verify_.size(), key};
-     bytes_.insert(bytes_.end(), src, src + n);
-@@ -713,6 +761,76 @@ static bool frustum_backdrop(const DrawCall& dc, const Frame& f) {
+   }
+@@ -555,8 +719,26 @@ class VertexDecodeWorker {
+       host::SimCostScope cost(host::SIM_DECODE);
+       std::unique_lock<std::mutex> lock(mutex_);
+       publish_locked();
++      // Work stealing: whatever the worker has not claimed yet, the game thread decodes itself rather
++      // than waiting for it. A worker that is never scheduled (build 89/90: the boot froze at frame 5,
++      // waiting here for ever) then costs speed, not the game. Only a batch the worker has already
++      // claimed is waited for, and a worker that claimed it is running.
++      if (taken_ < published_) {
++        const size_t begin = taken_, end = published_;
++        taken_ = end;
++        lock.unlock();
++        for (size_t i = begin; i < end; ++i) decode_run(jobs_[i].state, bytes_.data() + jobs_[i].bytes_at, jobs_[i].count, jobs_[i].out);
++        stolen_ += end - begin;
++        lock.lock();
++        finished_ += end - begin;
++      }
+       done_.wait(lock, [&] { return finished_ == published_; });
+     }
++    if (const uint64_t failed = failed_jobs_.load(std::memory_order_relaxed); failed != failed_logged_) {
++      if (failed_logged_ < 20) host::log("gx: vertex worker: a draw's vertex data was outside game memory (%llu so far); left out",
++                                        (unsigned long long)failed);
++      failed_logged_ = failed;
++    }
+     if (verify_on_) {
+       for (const Job& job : jobs_) {
+         ++verified_jobs_;
+@@ -577,6 +759,7 @@ class VertexDecodeWorker {
+     unpublished_vertices_ = 0;
+   }
+ };
++#endif
+ VertexDecodeWorker g_vertex_decoder;
+ 
+ // Decodes `count` vertices of format `fmt` from `src` into the frame. Returns components mask.
+@@ -713,6 +896,91 @@ static bool frustum_backdrop(const DrawCall& dc, const Frame& f) {
    return true;
  }
  
@@ -1072,6 +1336,21 @@ index ce0a964..a39450e 100644
 +// edge of the 4:3 view to the other and no further. Draws that already reach past the edges are
 +// real backgrounds and keep widening; draws narrower than the view (text, frames) are untouched.
 +static bool fills_4x3_width_check(const DrawCall& dc, const Frame& f, float* out_lo, float* out_hi);
++// The check reads the draw's decoded positions. With the vertex worker busy they may not be decoded
++// yet, and the check saw half-written corners: the stage select's "Now loading" shade was taken on
++// some frames and widened into a box on others (the flicker of builds 89-93). Such draws are checked
++// once the frame's vertices are complete (finish_fills_4x3_width, before the frame is handed on).
++static bool g_fills_deferred = false;
++static bool fills_4x3_width(const DrawCall& dc, const Frame& f);
++static bool fills_4x3_width_now(const DrawCall& dc, const Frame& f) {
++  if (g_vertex_decoder.pending()) { g_fills_deferred = true; return false; }
++  return fills_4x3_width(dc, f);
++}
++static void finish_fills_4x3_width(Frame& f) {
++  if (!g_fills_deferred) return;
++  g_fills_deferred = false;
++  for (DrawCall& dc : f.draws) dc.fills_4x3_width = fills_4x3_width(dc, f);
++}
 +// The check, plus a record in boot.log of draws that come close (wide, centred) but are not taken,
 +// at most 80 lines a run: what to tune when a menu still shows a seam.
 +static bool fills_4x3_width(const DrawCall& dc, const Frame& f) {
@@ -1081,10 +1360,10 @@ index ce0a964..a39450e 100644
 +  if (f.scene_major >= 0x0A && f.scene_major <= 0x0D) return false;
 +  float lo = 0, hi = 0;
 +  bool taken = fills_4x3_width_check(dc, f, &lo, &hi);
-+  // The stage select (02:01): its "Now loading" shade passes the test on most frames and narrowly
-+  // misses it on the odd one, so for a frame it was widened into a box and the screen's edges flashed
-+  // bright (build 90's log: one quad flipping between the two). A quad taken once on this screen
-+  // (same vertex count, texture and matrix) stays taken until the scene changes.
++  // The stage select (02:01): its "Now loading" shade flipped between taken and widened from frame to
++  // frame (build 90's log). The cause was the check reading vertices the worker had not decoded yet
++  // (see g_fills_deferred); as a second guard, a quad taken once on this screen (same vertex count,
++  // texture and matrix) stays taken until the scene changes.
 +  static bool in_select = false;
 +  static std::vector<uint64_t> kept;
 +  const bool select_now = f.scene_major == 0x02 && f.scene_minor == 0x01;
@@ -1140,23 +1419,31 @@ index ce0a964..a39450e 100644
  // Coverage of the render semantics, logged every 600 frames that carried any: how many draws the
  // game described (material, camera) and what it sent. The F1 gate reads this line.
  static void note_rtx_semantics_frame(const Frame& frame) {
-@@ -749,6 +867,7 @@ void record_draw(uint32_t primitive, uint32_t first, uint32_t count, uint32_t co
+@@ -749,6 +1017,7 @@ void record_draw(uint32_t primitive, uint32_t first, uint32_t count, uint32_t co
        previous.vertex_count += count;
        ++previous.segment_count;
        previous.frustum_backdrop = false;
-+      if (menu_widescreen_fill() && menu_scene_now()) previous.fills_4x3_width = fills_4x3_width(previous, g_frame);
++      if (menu_widescreen_fill() && menu_scene_now()) previous.fills_4x3_width = fills_4x3_width_now(previous, g_frame);
        ++g_draws;
        g_vertices += count;
        if (g_dl_addr) { ++g_dl_draws; g_dl_vertices += count; }
-@@ -813,6 +932,7 @@ void record_draw(uint32_t primitive, uint32_t first, uint32_t count, uint32_t co
+@@ -813,6 +1082,7 @@ void record_draw(uint32_t primitive, uint32_t first, uint32_t count, uint32_t co
        if (dc.authored_pose->envelope) ++authored_stats().posed_draws_envelope;
      } }
    dc.frustum_backdrop = frustum_backdrop(dc, g_frame);   // SkipInit: written every draw
-+  dc.fills_4x3_width = menu_widescreen_fill() && menu_scene_now() && fills_4x3_width(dc, g_frame);
++  dc.fills_4x3_width = menu_widescreen_fill() && menu_scene_now() && fills_4x3_width_now(dc, g_frame);
    dc.rtx = rtx_draw_info(g_rtx_state);
    g_frame.draws.push_back(std::move(dc));
    g_frame.segments.push_back({first, count, primitive});
-@@ -1172,6 +1292,9 @@ static size_t parse_command_inner(const uint8_t* d, size_t len) {
+@@ -937,6 +1207,7 @@ void bp_write(uint32_t value) {
+         note_rtx_semantics_frame(g_frame);
+         const bool unseen = replay_control::skip_render();
+         g_vertex_decoder.join();   // the frame's vertices are complete before anyone else sees them
++        finish_fills_4x3_width(g_frame);
+         if (g_backend && !unseen) {
+           host::perf::Scope submit_cost(host::perf::Stage::Submit);
+           g_backend->submit_and_recycle(g_frame);
+@@ -1172,6 +1443,9 @@ static size_t parse_command_inner(const uint8_t* d, size_t len) {
  }
  
  }  // namespace
@@ -3905,10 +4192,10 @@ index 0000000..8eefa03
 +} // namespace linux_renderer
 diff --git a/port/switch2/host_switch.cpp b/port/switch2/host_switch.cpp
 new file mode 100644
-index 0000000..da9cd75
+index 0000000..9ef2848
 --- /dev/null
 +++ b/port/switch2/host_switch.cpp
-@@ -0,0 +1,1708 @@
+@@ -0,0 +1,1743 @@
 +// Switch 2 (kaiHEN NRO) machine services for the native source game.
 +// Boot-test stage: memory, disc, timing, audio DSP, memory card and pads; no renderer yet.
 +// Derived from port/linux/host_services.cpp.
@@ -3918,7 +4205,7 @@ index 0000000..da9cd75
 +#include <zlib.h>
 +#include "launcher_art.h"
 +#include "options_art.h"   // the options screen (launcher/options_art.py)
-+#define MU_APP_VERSION "0.8.4"
++#define MU_APP_VERSION "0.8.5"
 +extern "C" int mu_crumbs_on;   // 1.0 = fully working; also APP_VERSION in the NRO Makefile
 +#ifdef MU_SWITCH_GRAPHICS
 +#include "gx_shader.h"
@@ -3983,6 +4270,21 @@ index 0000000..da9cd75
 +    std::fprintf(f, "%llu ms: %s\n", (unsigned long long)(armTicksToNs(armGetSystemTick()) / 1000000), step);
 +    std::fclose(f);
 +  }
++}
++// Threads for the renderer-side code (gx_core.cpp's vertex worker): created like the game and render
++// threads (libnx threadCreate on a given core, big stack). The boot failures of builds 89-96 turned
++// out to be the mutex/condition-variable hand-over, not the thread itself (see gx_core.cpp).
++extern "C" void* mu_thread_start(void (*entry)(void*), void* arg, int core, size_t stack) {
++  Thread* t = new Thread{};
++  s32 priority = 0x2C;
++  svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
++  if (R_FAILED(threadCreate(t, entry, arg, nullptr, stack, priority, core))) { delete t; return nullptr; }
++  if (R_FAILED(threadStart(t))) { threadClose(t); delete t; return nullptr; }
++  return t;
++}
++extern "C" void mu_thread_join(void* handle) {
++  Thread* t = static_cast<Thread*>(handle);
++  threadWaitForExit(t); threadClose(t); delete t;
 +}
 +namespace { void set_config_value(const char* key, const char* value); }   // config.ini, defined below main
 +namespace host { extern double g_switch_sim_costs[]; }
@@ -4067,6 +4369,10 @@ index 0000000..da9cd75
 +  std::lock_guard<std::mutex> lock(log_mutex);
 +  std::vfprintf(log_file, format, args);
 +  std::fputc('\n', log_file);
++  // The first 250 lines (the boot) are flushed one by one: a crash at boot otherwise loses up to a
++  // second of lines (build 93: two closes whose logs stopped mid-line, before the cause).
++  static int lines = 0;
++  if (++lines <= 250) std::fflush(log_file);
 +  // Not flushed here: a write to the SD card from the game thread can take milliseconds, a frame
 +  // hitch for a log line. The watchdog (main thread) flushes once a second, so a crash loses at
 +  // most the last second.
@@ -4105,6 +4411,21 @@ index 0000000..da9cd75
 +  {
 +    const double spare = std::chrono::duration<double, std::milli>(target - now).count();
 +    spare_sum_ms += spare; spare_least_ms = std::min(spare_least_ms, spare); ++spare_frames;
++    // Diagnostic (the hitch at a match's "Ready, GO!"): a frame more than 40 ms late says where this
++    // frame's game-thread time went (queue = waiting for the render thread to take the frame).
++    static double last[9] = {};
++    double now_cost[9], delta[9];
++    for (int i = 0; i < 9; ++i) {
++      now_cost[i] = ::host::g_switch_sim_costs[i];
++      delta[i] = (now_cost[i] >= last[i] ? now_cost[i] - last[i] : now_cost[i]) * 1000.0;
++      last[i] = now_cost[i];
++    }
++    static int slow_logged = 0;
++    if (spare < -40.0 && slow_logged < 40) {
++      ++slow_logged;
++      log("slow game frame: retrace %u, %.1f ms late: disc %.1f, ax %.1f, texsnap %.1f, queue %.1f, record %.1f, gxdecode %.1f (ms)",
++          count.retraces, -spare, delta[0], delta[1], delta[4], delta[5], delta[7], delta[8]);
++    }
 +  }
 +  if (now > target + std::chrono::milliseconds(33)) { wall_start += now - target; ++pace_resyncs; return; }
 +  std::this_thread::sleep_until(target);
@@ -5029,7 +5350,7 @@ index 0000000..da9cd75
 +  // other launch).
 +  if (std::getenv("MU_TEXTURE_PACKS")) gx::texpack::start_decoders();
 +#endif
-+  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 92, threaded graphics + sound, widescreen, 20XX)");
++  log("Smash Melee Switch 2 v" MU_APP_VERSION " (build 104, threaded graphics + sound, widescreen, 20XX)");
 +  // The call trace slows the game to a crawl (a flushed SD write per call): only on request.
 +  if (FILE* on = std::fopen("sdmc:/melee/trace.on", "r")) {
 +    std::fclose(on);
@@ -5309,7 +5630,7 @@ index 0000000..da9cd75
 +  if (FILE* f = std::fopen("sdmc:/melee/launches.txt", "a")) {
 +    const time_t now = std::time(nullptr);
 +    char when[32]; std::strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-+    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 92)\n", when, what);
++    std::fprintf(f, "%s %s (v" MU_APP_VERSION ", build 104)\n", when, what);
 +    std::fclose(f);
 +  }
 +}
@@ -5580,9 +5901,10 @@ index 0000000..da9cd75
 +    cfg.tournament_edition = switch_host::g_sweep_requested ? false : pick_game() == 1;
 +    // Texture packs (sdmc:/melee/textures/<pack>): the renderer indexes them before the game starts.
 +    if (config_value("hdtextures") == "1") setenv("MU_TEXTURE_PACKS", "1", 1);
-+    // vertexthread=1: vertex decoding on a thread of its own (core 2). Off by default: it froze the
-+    // boot at frame 5 in two launches of three (build 92), waiting on a worker that never ran.
-+    if (config_value("vertexthread") == "1") gx::set_vertex_worker_core(2);
++    // vertexthread=0: vertex decoding stays on the game thread. On by default since build 93: the
++    // game thread now decodes whatever the worker has not started instead of waiting for it (builds
++    // 89-90 froze the boot at frame 5 waiting for a worker that never ran).
++    if (config_value("vertexthread") == "0") gx::set_vertex_worker_core(-1);
 +    if (!config_value("texdecoders").empty()) setenv("MU_TEXTURE_DECODERS", config_value("texdecoders").c_str(), 1);
 +
 +    const bool was_logging = g_logging;

@@ -5,7 +5,7 @@ Based on [melee-unlocked](https://github.com/hero88go/melee-unlocked).
 
 ![The game picker](docs/picker.png)
 
-**Status: beta (v0.8.4).** Offline play only for now. Online play through Slippi is considered for a future release.
+**Status: beta (v0.8.5).** Offline play only for now. Online play through Slippi is considered for a future release.
 
 ## You must supply your own game
 
@@ -41,6 +41,11 @@ every VS stage with every item. The first launch builds all of them before the g
 Later launches show **"Loading graphics"** for about 10 seconds while the built shaders load. Matches then
 run without shader stutter. A rare effect the list missed may still hitch once, the first time it appears.
 
+The graphics driver also finishes each shader the first time it is drawn with, which on a new install can
+cause a short pause at a match's "Ready... GO!". The menus do this work in the background (a little each
+frame, keeping 60 fps), and the driver keeps the result on the SD card, so the pause goes away after the
+first few sessions.
+
 The built shaders are kept on the SD card (`sdmc:/config/ouncevk/shader-cache` and
 `sdmc:/melee/shader-cache`, together around 150 MB). Deleting them is safe; the next launch builds them
 again. Changing the resolution (`scale`) builds them once more for the new resolution.
@@ -72,12 +77,13 @@ textures can also be changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
 |---|---|
-| `scale` | Internal resolution. `4` (the default) is 2560x2112: matches, including four players, and the menus hold 60 fps; only the results screen after a match with 3 or 4 players dips, to the high 40s. `2` holds 60 fps everywhere. `1`, `1.5` and `3` also work. |
+| `scale` | Internal resolution. `4` (the default) is 2560x2112 and holds 60 fps in matches (four players included), the menus and the results screen. `1`, `1.5`, `2` and `3` also work. |
 | `rumble` | Controller rumble strength: `0` = off (default), `50` = normal, `100` = strongest. Melee's own per-player Rumble option also applies. |
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
 | `boot` | `ask`, `normal` or `te`. |
 | `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/melee/textures/` (see below). Off by default. |
+| `vertexthread` | `1` (the default) decodes the game's vertex data on a processor core of its own, which keeps the results screen after a 4-player match at 60 fps. `0` keeps it on the game's thread. |
 | `logging` | `1` writes log files for reporting a problem. Off by default. |
 | `crashtrail` | `1` also records what ran just before a crash. Slows the game; leave at `0`. |
 
@@ -105,7 +111,6 @@ Packs only change how things look, so they are safe to use with any game mode.
 
 ## Known issues
 
-- At `scale=4`, the results screen after a match with 3 or 4 players drops into the high 40s; 1v1 is unaffected. Everything else at 4x, matches included, runs at 60 fps.
 - TE's input display and quieter Dream Land 64 music are not implemented.
 - No online play.
 - Tested in handheld and docked mode, mostly in VS mode. Single-player modes have had little testing.
