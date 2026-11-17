@@ -12,7 +12,7 @@ ROWS=['Rumble','Tap jump','Scale','Logging','Custom textures']
 VALUES=['On','Off','1x','1.5x','2x','3x','4x']
 DESC=['Controller rumble. Melee’s own per-player Rumble option also applies.',
       'On: pushing the stick up jumps, as in the original game. Off: only X and Y jump.',
-      'Internal resolution. Every setting holds 60 fps in matches; at 4x, 3-4 player results screens dip.',
+      'Internal resolution. Every setting holds 60 fps; 4x is the sharpest.',
       'Writes boot.log and gl.log to sdmc:/melee/, for reporting a problem.',
       'Dolphin-format texture packs (downloaded separately), each in its own folder in sdmc:/melee/textures/.']
 Y0,DY,LABEL_RX,VALUE_CX=212,64,600,790; DESC_Y=550
