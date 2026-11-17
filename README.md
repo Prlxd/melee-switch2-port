@@ -111,6 +111,7 @@ Packs only change how things look, so they are safe to use with any game mode.
 
 ## Known issues
 
+- **Home-Run Contest does not work correctly. Avoid it for now.**
 - TE's input display and quieter Dream Land 64 music are not implemented.
 - No online play.
 - Tested in handheld and docked mode, mostly in VS mode. Single-player modes have had little testing.
