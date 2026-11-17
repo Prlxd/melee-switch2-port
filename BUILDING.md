@@ -3,7 +3,8 @@
 This repository holds the Switch 2 port as changes on top of
 [melee-unlocked](https://github.com/hero88go/melee-unlocked). You need a melee-unlocked checkout at
 the exact commit below, the devkitPro Switch toolchain with libnx, and the Switch 2 graphics stack the
-port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file).
+port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file). Built and tested with
+ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf02006672).
 
 | | Commit |
 |---|---|
@@ -15,7 +16,7 @@ port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file).
 | Path | Contents |
 |---|---|
 | `patches/melee-unlocked-switch2.patch` | Changes and new files in melee-unlocked (the Switch 2 host, renderer and game fixes). |
-| `patches/melee-decomp-switch2.patch` | Changes to the decompiled game code (20 files), applied after melee-unlocked's own `sourceport/patches/melee-native.patch`. |
+| `patches/melee-decomp-switch2.patch` | Changes to the decompiled game code (21 files), applied after melee-unlocked's own `sourceport/patches/melee-native.patch`. |
 | `switch2/nro/` | The NRO Makefile, the list of source files it builds, and one generated source. |
 | `switch2/launcher/` | The scripts that draw the launcher's screens (game picker, options, "Preparing graphics") and the icon, the two picker panels, and the script that packs the built-in shader list. |
 

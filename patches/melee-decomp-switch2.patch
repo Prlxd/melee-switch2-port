@@ -365,6 +365,39 @@
  
      if (DbLevel != DbLKind_Master && db_gameLaunchButtonState & HSD_PAD_R &&
          hsd_803931A4(-1))
+--- a/src/melee/gm/gmregclear.c
++++ b/src/melee/gm/gmregclear.c
+@@ -256,6 +256,30 @@
+     s32 temp;
+ 
+     temp = HSD_SisLib_803A611C(3, NULL, 9U, 0xDU, 0U, 0x14U, 0U, 0x13U);
++#ifdef MU_NATIVE
++    {
++        /* The bonus list is text on its own 640x480 orthographic camera, which the renderer never
++         * widens, while the panel it sits in is 3D and is widened with the picture: on a 16:9
++         * screen the names and numbers spilled out of both sides of the panel. Its camera is
++         * widened by the same amount here (about the middle of the screen), so it keeps its
++         * place in the panel. 1 with the original 4:3 picture: no change. */
++        extern float mu_picture_widen(void);
++        const float widen = mu_picture_widen();
++        if (widen != 1.0f) {
++            sislib_UnkAlloc3* canvas = NULL;
++            sislib_UnkAlloc3* it;
++            for (it = HSD_SisLib_804D797C; it != NULL; it = it->x0) {
++                if (it->xA == 3 && it->x4 != NULL) {
++                    canvas = it;
++                }
++            }
++            if (canvas != NULL && GET_COBJ(canvas->x4) != NULL) {
++                HSD_CObjSetOrtho(GET_COBJ(canvas->x4), 0.0F, -480.0F, 320.0F - 320.0F * widen,
++                                 320.0F + 320.0F * widen);
++            }
++        }
++    }
++#endif
+     if (lbLang_IsSavedLanguageUS()) {
+         HSD_SisLib_803A62A0(3, "SdDec.usd", "SIS_DecisionData");
+     } else {
 --- a/src/melee/gm/gmscmemcard.c
 +++ b/src/melee/gm/gmscmemcard.c
 @@ -198,6 +198,9 @@
