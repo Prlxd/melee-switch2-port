@@ -1,11 +1,12 @@
 # Melee (Switch 2 Port)
 
-Super Smash Bros. Melee running natively on Switch 2 under [kaiHEN](https://github.com/ouncebrew/kaihen), with 20XX Tournament Edition built in.
+Super Smash Bros. Melee running natively on Switch 2 under [kaiHEN](https://github.com/ouncebrew/kaihen), with 20XX Tournament Edition built in
+and online play through Slippi.
 Based on [melee-unlocked](https://github.com/hero88go/melee-unlocked).
 
 ![The game picker](docs/picker.png)
 
-**Status: beta (v0.8.5).** Offline play only for now. Online play through Slippi is considered for a future release.
+**Status: beta (v0.9a).** Slippi Online is new and still being tested: see [Slippi Online](#slippi-online).
 
 ## You must supply your own game
 
@@ -17,19 +18,27 @@ Other regions and versions (PAL, 1.00, 1.01) are not supported. Do not ask for t
 
 ## Install
 
-1. Download `melee-switch2-port.nro` from the [Releases](../../releases) 
-2. Create the folder `sdmc:/switch/melee-switch2-port/`.
-3. Copy your Melee 1.02 NTSC ISO into it, so you have:
+1. Create the folder `sdmc:/switch/melee/` on your SD card.
+2. Download `melee-switch2-port.nro` from the [Releases](../../releases) page and copy it into that folder.
+3. Copy your Melee 1.02 NTSC ISO into the same folder, so you have:
 
    ```
    sdmc:/
    └── switch/
-       └── melee-switch2-port/
+       └── melee/
            ├── melee-switch2-port.nro
            └── Super Smash Bros. Melee (v1.02 NTSC).iso
    ```
 
+   Everything the port keeps (settings, memory card, logs, textures, shaders, Slippi login and replays)
+   goes in this folder too.
+
 4. Start it from the homebrew menu.
+
+**Updating from an older version:** older versions used `sdmc:/melee/` (or `sdmc:/switch/melee-switch2-port/`).
+Put the new NRO in `sdmc:/switch/melee/` and start it once: it moves your ISO, settings, memory card and
+everything else from the old folder into the new one, and removes the old folder if nothing is left in it.
+Delete the old NRO afterwards.
 
 ## First launch: "Preparing graphics"
 
@@ -37,7 +46,7 @@ The port comes with a list of about 2,800 shaders, recorded on a Switch 2 by pla
 every VS stage with every item. The first launch builds all of them before the game starts, behind a
 **"Preparing graphics"** screen with a progress bar. This takes **a minute or two**, once.
 
-Later launches show **"Loading graphics"** for about 10 seconds while the built shaders load. Matches then
+Later launches show **"Loading graphics"** for about 15 seconds while the built shaders load. Matches then
 run without shader stutter. A rare effect the list missed may still hitch once, the first time it appears.
 
 The graphics driver also finishes each shader the first time it is drawn with, which on a new install can
@@ -46,17 +55,18 @@ frame, keeping 60 fps), and the driver keeps the result on the SD card, so the p
 first few sessions.
 
 The built shaders are kept on the SD card (`sdmc:/config/ouncevk/shader-cache` and
-`sdmc:/switch/melee-switch2-port/shader-cache`, together around 150 MB). Deleting them is safe; the next launch builds them
+`sdmc:/switch/melee/shader-cache`). Deleting them is safe; the next launch builds them
 again. Changing the resolution (`scale`) builds them once more for the new resolution.
 
 ## Choosing a game
 
-The first start shows a picker with two choices:
+The first start shows a picker with three choices:
 
 | | |
 |---|---|
 | **Super Smash Bros. Melee** | The original game |
 | **20XX Tournament Edition** | Tournament settings and 20XX CPUs |
+| **Slippi Online** | Online play with a Slippi account (Slippi's menus, matchmaking and rollback) |
 
 - **A** starts the highlighted game and makes it your default.
 - **Y** starts it this once.
@@ -65,13 +75,46 @@ The first start shows a picker with two choices:
 
 20XX Tournament Edition needs no extra files. Its settings are in **VS Mode > Tournament Melee**.
 
+## Slippi Online
+
+The **Slippi Online** choice plays online through [Slippi](https://slippi.gg): Unranked and Direct
+matchmaking with rollback netcode, against players on Slippi Dolphin (PC) or on another Switch 2.
+
+> **Note:** going online under kaiHEN means the console connects to the internet. Use 90DNS (or a
+> similar block of Nintendo's servers) as you would for any online homebrew; this carries some risk.
+
+**Logging in.** The port uses the login of the Slippi Launcher on your PC:
+
+1. Log in once with the Slippi Launcher on a PC (or use a second account made for the Switch).
+2. Copy its `user.json` to `sdmc:/switch/melee/slippi/user.json`. It is in the Slippi Launcher's
+   `netplay` folder; on Windows usually `%AppData%\Slippi Launcher\netplay\User\Slippi\`.
+3. Pick **Slippi Online**: your name and connect code show in the online menu.
+
+`user.json` is your account's key: do not share it or post it with logs.
+
+**Replays.** Every Slippi Online game is saved as a `.slp` replay in `sdmc:/switch/melee/replays/`, which
+the Slippi Launcher on a PC can play.
+
+**What to know:**
+
+- **Ranked is not available yet**: the port cannot send match results to Slippi's servers yet.
+- In Slippi Online the game always plays as on Slippi Dolphin: tap jump is on and the port's own
+  gameplay options are off, so both sides stay in sync.
+- A wired connection helps. On a laggy connection the game rewinds often, and each rewind costs more
+  on the Switch 2 than on a PC, so play can stutter; making rewinds faster is the next step.
+- The music plays inside the game and may skip for a moment when the game rewinds.
+
+**Help test it:** if a game **desyncs** (the two players see different things), please open an issue
+with the replay from **both** sides and your `boot.log` (`logging=1`). The two replays show the exact
+frame where the games disagreed.
+
 ## Controls
 
 - **+ and - together**: quit to the homebrew menu.
 
 ## Settings
 
-`sdmc:/switch/melee-switch2-port/config.ini` is created on first start. Rumble, tap jump, resolution, logging and custom
+`sdmc:/switch/melee/config.ini` is created on first start. Rumble, tap jump, resolution, logging and custom
 textures can also be changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
@@ -80,8 +123,8 @@ textures can also be changed from the picker's options screen (**X**).
 | `rumble` | Controller rumble strength: `0` = off (default), `50` = normal, `100` = strongest. Melee's own per-player Rumble option also applies. |
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
-| `boot` | `ask`, `normal` or `te`. |
-| `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/switch/melee-switch2-port/textures/` (see below). Off by default. |
+| `boot` | `ask`, `normal`, `te` or `slippi`. |
+| `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/switch/melee/textures/` (see below). Off by default. |
 | `vertexthread` | `1` (the default) decodes the game's vertex data on a processor core of its own, which keeps the results screen after a 4-player match at 60 fps. `0` keeps it on the game's thread. |
 | `logging` | `1` writes log files for reporting a problem. Off by default. |
 | `crashtrail` | `1` also records what ran just before a crash. Slows the game; leave at `0`. |
@@ -92,8 +135,8 @@ The port loads Dolphin-format texture packs: folders of PNG files named like `te
 the kind made for Dolphin's `Load/Textures/GALE01` folder. No pack is included; download them from their
 authors.
 
-1. Put each pack in its own folder in `sdmc:/switch/melee-switch2-port/textures/`, for example
-   `sdmc:/switch/melee-switch2-port/textures/Melee HD/`. If the pack's download has a `GALE01` folder, copying that folder in
+1. Put each pack in its own folder in `sdmc:/switch/melee/textures/`, for example
+   `sdmc:/switch/melee/textures/Melee HD/`. If the pack's download has a `GALE01` folder, copying that folder in
    works too.
 2. Turn **Custom textures** on in the options screen (**X** in the picker), or set `hdtextures=1`.
 
@@ -112,27 +155,27 @@ Packs only change how things look, so they are safe to use with any game mode.
 
 - **Home-Run Contest does not work correctly. Avoid it for now.**
 - TE's input display and quieter Dream Land 64 music are not implemented.
-- No online play.
+- Slippi Online: no Ranked yet, and rewinds on a laggy connection can stutter (see [Slippi Online](#slippi-online)).
 - Tested in handheld and docked mode, mostly in VS mode. Single-player modes have had little testing.
 
 ## Reporting a problem
 
 Open an issue on this GitHub repository. Logs are off by default, so collect them first:
 
-1. In `sdmc:/switch/melee-switch2-port/config.ini`, set `crashtrail=1`. This turns logging on and records what ran just
+1. In `sdmc:/switch/melee/config.ini`, set `crashtrail=1`. This turns logging on and records what ran just
    before a crash. The game runs slower while it is on.
 2. Reproduce the problem.
 3. If it was a crash, **launch the port once more** so the crash trail is written into the log.
-4. Attach these files from `sdmc:/switch/melee-switch2-port/` to your issue:
+4. Attach these files from `sdmc:/switch/melee/logs/` to your issue:
    - `crumbs.bin` (the crash trail file)
    - `boot.log` and `boot.1.log`
    - `gl.log` and `gl.1.log`
 5. Say which version you ran (shown in the top-right of the game picker), which game you picked
-   (Melee or 20XX Tournament Edition), and what you were doing: characters, stage, mode.
+   (Melee, 20XX Tournament Edition or Slippi Online), and what you were doing: characters, stage, mode.
 6. Set `crashtrail=0` again afterwards to get full speed back.
 
 For a problem that is not a crash (a visual glitch, slowdown), `logging=1` is enough and does not slow
-the game; attach `boot.log` and `gl.log`.
+the game; attach `boot.log` and `gl.log` from the `logs` folder.
 
 ## Credits and license
 

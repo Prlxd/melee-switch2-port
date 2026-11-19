@@ -3,12 +3,14 @@
 This repository holds the Switch 2 port as changes on top of
 [melee-unlocked](https://github.com/hero88go/melee-unlocked). You need a melee-unlocked checkout at
 the exact commit below, the devkitPro Switch toolchain with libnx, and the Switch 2 graphics stack the
-port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file). Built and tested with
-ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf02006672).
+port uses (OunceVK: Mesa Zink and NVK, with its CMake toolchain file). Slippi Online also needs
+[Mbed TLS 3.6.2](https://github.com/Mbed-TLS/mbedtls/tree/v3.6.2) (source only). Built and tested with
+ounce-devkit 20261117 (libounce 39406be1f25a, kaihen ddbf02006672) with the ouncevk-20261118 graphics
+stack (Mesa 26.2.2, git-2d6a8aec8b).
 
 | | Commit |
 |---|---|
-| melee-unlocked | `0696966d250fd0decdc53218aaafb60cbb763296` (Version 0.9.118) |
+| melee-unlocked | `71a9865d35b551b14896fcbd6d702db2f2df9207` (Version 0.9.218) |
 | its `sourceport/extern/melee` submodule (doldecomp/melee) | `039c4bf4ca33338c35d21901ad19b7ede19d19ad` |
 
 ## What is here
@@ -18,7 +20,9 @@ ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf0
 | `patches/melee-unlocked-switch2.patch` | Changes and new files in melee-unlocked (the Switch 2 host, renderer and game fixes). |
 | `patches/melee-decomp-switch2.patch` | Changes to the decompiled game code (21 files), applied after melee-unlocked's own `sourceport/patches/melee-native.patch`. |
 | `switch2/nro/` | The NRO Makefile, the list of source files it builds, and one generated source. |
-| `switch2/launcher/` | The scripts that draw the launcher's screens (game picker, options, "Preparing graphics") and the icon, the two picker panels, and the script that packs the built-in shader list. |
+| `switch2/launcher/` | The scripts that draw the launcher's screens (game picker, options, the loading screens) and the icon, the two picture panels of the picker, the script that packs the built-in shader list, the one that packs Slippi's menu files, and `slp_compare.py`, which compares two `.slp` replays of the same game frame by frame (for desyncs). |
+| `switch2/slippi-net/` | Makefile for `libslippi_net.a`: melee-unlocked's Slippi online code, ENet, the port's TLS and its stubs. |
+| `switch2/mbedtls/` | Makefile and settings (`switch_config.h`) for `libmbedtls_all.a`. |
 
 ## Steps
 
@@ -26,7 +30,7 @@ ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf0
    ```sh
    git clone https://github.com/hero88go/melee-unlocked
    cd melee-unlocked
-   git checkout 0696966d250fd0decdc53218aaafb60cbb763296
+   git checkout 71a9865d35b551b14896fcbd6d702db2f2df9207
    git submodule update --init sourceport/extern/melee
    ```
 2. **Apply melee-unlocked's own patch to the decompiled code, then this port's:**
@@ -44,7 +48,7 @@ ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf0
    ```sh
    cmake -S sourceport/game -B build-game -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_TOOLCHAIN_FILE=$DEVKITPRO/libounce/cmake/Switch2.cmake \
-     -DMU_NO_SLIPPI=ON -DMU_AKANEIA_FIGHTERS=ON -DMU_ACE_FIGHTERS=ON -DMU_MEX_STAGES=ON -DMU_ROGUE=ON \
+     -DMU_NO_SLIPPI=OFF -DMU_AKANEIA_FIGHTERS=ON -DMU_ACE_FIGHTERS=ON -DMU_MEX_STAGES=ON -DMU_ROGUE=ON \
      -DCMAKE_C_FLAGS="-mcpu=cortex-a78c+crypto -mtp=soft -ftls-model=local-exec -ffunction-sections -fdata-sections -D__SWITCH__ -D__SWITCH2__" \
      -DCMAKE_CXX_FLAGS="-mcpu=cortex-a78c+crypto -mtp=soft -ftls-model=local-exec -ffunction-sections -fdata-sections -D__SWITCH__ -D__SWITCH2__"
    make -C build-game melee_game
@@ -54,9 +58,11 @@ ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf0
    `POPPINS_DIR` to its folder if it is not in `/usr/share/fonts/truetype/google-fonts`):
    ```sh
    L=/path/to/this-repo/switch2/launcher
-   python3 $L/make.py 0.8.5 .             # the game picker: port/switch2/launcher_art.h, and icon.jpg
-   python3 $L/options_art.py 0.8.5 .      # the options screen: port/switch2/options_art.h
-   python3 $L/prewarm_screen.py 0.8.5 .   # "Preparing graphics": port/switch2/prewarm_art.h
+   python3 $L/make.py 0.9a .              # the game picker: port/switch2/launcher_art.h, and icon.jpg
+   python3 $L/options_art.py 0.9a .       # the options screen: port/switch2/options_art.h
+   python3 $L/prewarm_screen.py 0.9a .    # the loading screens: port/switch2/prewarm_art.h
+   python3 $L/slippi_sys.py .             # Slippi's menu files: port/switch2/slippi_sys_files.h
+   python3 tools/native_recording_codes.py port/switch2/native_recording_codes.h   # replay header codes
    ```
    `art.py` redraws the two picker panels (`art/left.png`, `art/right.png`); they are already in the
    repository, so it is optional.
@@ -64,14 +70,21 @@ ounce-devkit 20261117 (libounce 39406be1f25a, ouncevk 114e9298fc0e, kaihen ddbf0
    The built-in shader list, `port/switch2/shader_seed.h`, comes with the patch. It was recorded on a
    Switch 2 by the shader sweep (`shadersweep=1` in `config.ini`: 203 scripted matches covering every
    character, VS stage and item); `shader_seed.py` packs the `recipes.bin` files such a run leaves in
-   `sdmc:/melee/shader-cache/` into that header.
-6. **Build the NRO.** It also needs glslang and SPIRV-Cross built for Switch 2, in one folder
+   `sdmc:/switch/melee/shader-cache/` into that header.
+6. **Build Mbed TLS and the Slippi online layer:**
+   ```sh
+   R=/path/to/this-repo/switch2
+   make -C $R/mbedtls MBEDTLS=/path/to/mbedtls-3.6.2 OUT=$PWD/build-mbedtls
+   make -C $R/slippi-net MU=$PWD MBEDTLS=/path/to/mbedtls-3.6.2 OUT=$PWD/build-slippi-net
+   ```
+7. **Build the NRO.** It also needs glslang and SPIRV-Cross built for Switch 2, in one folder
    (`THIRD`):
    ```sh
    cp -r /path/to/this-repo/switch2/nro ./nro && cp /path/to/this-repo/switch2/launcher/icon.jpg nro/
    sh nro/link-sources.sh .
    make -C nro MU=$PWD GAME_O=$PWD/build-game/melee_game.o THIRD=/path/to/third
    ```
+   (`SLIPPI_NET` and `MBEDTLS_LIB` default to the two libraries built in step 6.)
    The result is `nro/melee-switch2-port.nro`.
 
 Outside a git checkout, use `patch -p1 < file.patch` in place of `git apply file.patch`.

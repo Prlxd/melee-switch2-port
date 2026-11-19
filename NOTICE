@@ -121,3 +121,12 @@ Shipped beside the program under their own terms, not covered by the GPL:
 Super Smash Bros. Melee is the property of Nintendo and HAL Laboratory. Melee Unlocked is not
 affiliated with or endorsed by Nintendo, HAL Laboratory, NVIDIA, Intel, AMD or the projects above.
 You supply your own disc image.
+
+
+Switch 2 port (this repository)
+- Mbed TLS 3.6.2 (Apache-2.0, https://github.com/Mbed-TLS/mbedtls): the TLS of Slippi Online's
+  matchmaking, built into the NRO by switch2/mbedtls
+- The Mozilla CA root certificates (MPL-2.0, as shipped by the ca-certificates package): the
+  certificates the port trusts, in port/switch2/ca_bundle.h
+- Slippi's menu files (GPL-2.0-or-later, from Slippi Ishiiruka, through melee-unlocked's
+  port/slippi_sys): packed into port/switch2/slippi_sys_files.h by switch2/launcher/slippi_sys.py

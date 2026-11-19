@@ -19,3 +19,4 @@ shader_inproc.cpp port/switch2/shader_inproc.cpp
 shader_seed.h port/switch2/shader_seed.h
 subframe.cpp port/runtime/gx/subframe.cpp
 texture_pack.cpp port/runtime/gx/texture_pack.cpp
+vcdiff.cpp port/runtime/host/vcdiff.cpp

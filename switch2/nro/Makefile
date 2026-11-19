@@ -43,11 +43,14 @@ include $(DEVKITPRO)/libounce/switch2_rules
 MU		?=	../../melee-unlocked
 GAME_O		?=	$(MU)/build-game/melee_game.o
 THIRD		?=	../../third
+# The Slippi online layer and mbedTLS, built by switch2/slippi-net and switch2/mbedtls (see BUILDING.md).
+SLIPPI_NET	?=	$(MU)/build-slippi-net/libslippi_net.a
+MBEDTLS_LIB	?=	$(MU)/build-mbedtls/libmbedtls_all.a
 
 TARGET		:=	melee-switch2-port
 APP_TITLE	:=	Melee (Switch 2 Port)
 APP_AUTHOR	:=	Prlxd
-APP_VERSION	:=	0.8.5
+APP_VERSION	:=	0.9a
 ICON		:=	icon.jpg
 BUILD		:=	build
 SOURCES		:=	source
@@ -70,7 +73,7 @@ CXXFLAGS	:= $(CFLAGS) -std=gnu++17
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--defsym,__data_start__=__data_start -Wl,--defsym,__data_end__=__bss_start__
 
-LIBS	:= $(GAME_O) $(THIRD)/b-glslang/glslang/libglslang.a $(THIRD)/b-glslang/glslang/libglslang-default-resource-limits.a $(THIRD)/b-spvc/libspirv-cross-glsl.a $(THIRD)/b-spvc/libspirv-cross-core.a -lEGL -lz -lnx -lm
+LIBS	:= $(GAME_O) $(SLIPPI_NET) $(MBEDTLS_LIB) $(THIRD)/b-glslang/glslang/libglslang.a $(THIRD)/b-glslang/glslang/libglslang-default-resource-limits.a $(THIRD)/b-spvc/libspirv-cross-glsl.a $(THIRD)/b-spvc/libspirv-cross-core.a -lEGL -lz -lnx -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
