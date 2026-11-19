@@ -17,17 +17,16 @@ Other regions and versions (PAL, 1.00, 1.01) are not supported. Do not ask for t
 
 ## Install
 
-1. Download `melee-switch2-port.nro` from the [Releases](../../releases) page and copy it to
-   `sdmc:/switch/` on your SD card.
-2. Create the folder `sdmc:/melee/`.
+1. Download `melee-switch2-port.nro` from the [Releases](../../releases) 
+2. Create the folder `sdmc:/switch/melee/`.
 3. Copy your Melee 1.02 NTSC ISO into it, so you have:
 
    ```
    sdmc:/
-   ├── switch/
-   │   └── melee-switch2-port.nro
-   └── melee/
-       └── Super Smash Bros. Melee (v1.02 NTSC).iso
+   └── switch/
+       └── melee/
+          ├── melee-switch2-port.nro
+          ├── Super Smash Bros. Melee (v1.02 NTSC).iso
    ```
 
 4. Start it from the homebrew menu.
@@ -47,7 +46,7 @@ frame, keeping 60 fps), and the driver keeps the result on the SD card, so the p
 first few sessions.
 
 The built shaders are kept on the SD card (`sdmc:/config/ouncevk/shader-cache` and
-`sdmc:/melee/shader-cache`, together around 150 MB). Deleting them is safe; the next launch builds them
+`sdmc:/switch/melee/shader-cache`, together around 150 MB). Deleting them is safe; the next launch builds them
 again. Changing the resolution (`scale`) builds them once more for the new resolution.
 
 ## Choosing a game
@@ -72,7 +71,7 @@ The first start shows a picker with two choices:
 
 ## Settings
 
-`sdmc:/melee/config.ini` is created on first start. Rumble, tap jump, resolution, logging and custom
+`sdmc:/switch/melee/config.ini` is created on first start. Rumble, tap jump, resolution, logging and custom
 textures can also be changed from the picker's options screen (**X**).
 
 | Setting | Meaning |
@@ -82,7 +81,7 @@ textures can also be changed from the picker's options screen (**X**).
 | `tapjump` | `1` = stick up jumps, `0` = only X/Y jump. |
 | `cpu20xx` | 20XX CPU AI. `1` = in Tournament Edition only, `2` = always, `0` = never. |
 | `boot` | `ask`, `normal` or `te`. |
-| `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/melee/textures/` (see below). Off by default. |
+| `hdtextures` | Custom textures: `1` loads Dolphin-format texture packs from `sdmc:/switch/melee/textures/` (see below). Off by default. |
 | `vertexthread` | `1` (the default) decodes the game's vertex data on a processor core of its own, which keeps the results screen after a 4-player match at 60 fps. `0` keeps it on the game's thread. |
 | `logging` | `1` writes log files for reporting a problem. Off by default. |
 | `crashtrail` | `1` also records what ran just before a crash. Slows the game; leave at `0`. |
@@ -93,8 +92,8 @@ The port loads Dolphin-format texture packs: folders of PNG files named like `te
 the kind made for Dolphin's `Load/Textures/GALE01` folder. No pack is included; download them from their
 authors.
 
-1. Put each pack in its own folder in `sdmc:/melee/textures/`, for example
-   `sdmc:/melee/textures/Melee HD/`. If the pack's download has a `GALE01` folder, copying that folder in
+1. Put each pack in its own folder in `sdmc:/switch/melee/textures/`, for example
+   `sdmc:/switch/melee/textures/Melee HD/`. If the pack's download has a `GALE01` folder, copying that folder in
    works too.
 2. Turn **Custom textures** on in the options screen (**X** in the picker), or set `hdtextures=1`.
 
@@ -120,11 +119,11 @@ Packs only change how things look, so they are safe to use with any game mode.
 
 Open an issue on this GitHub repository. Logs are off by default, so collect them first:
 
-1. In `sdmc:/melee/config.ini`, set `crashtrail=1`. This turns logging on and records what ran just
+1. In `sdmc:/switch/melee/config.ini`, set `crashtrail=1`. This turns logging on and records what ran just
    before a crash. The game runs slower while it is on.
 2. Reproduce the problem.
 3. If it was a crash, **launch the port once more** so the crash trail is written into the log.
-4. Attach these files from `sdmc:/melee/` to your issue:
+4. Attach these files from `sdmc:/switch/melee/` to your issue:
    - `crumbs.bin` (the crash trail file)
    - `boot.log` and `boot.1.log`
    - `gl.log` and `gl.1.log`
