@@ -26,7 +26,7 @@ Other regions and versions (PAL, 1.00, 1.01) are not supported. Do not ask for t
    └── switch/
        └── melee-switch2-port/
            ├── melee-switch2-port.nro
-           ├── Super Smash Bros. Melee (v1.02 NTSC).iso
+           └── Super Smash Bros. Melee (v1.02 NTSC).iso
    ```
 
 4. Start it from the homebrew menu.
